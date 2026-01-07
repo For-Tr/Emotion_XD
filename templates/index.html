@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>面部表情识别管理平台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --success-color: #00d2ff;
+            --danger-color: #ff6b9d;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+        
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            animation: fadeInDown 0.8s ease;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border: none;
+            margin-bottom: 20px;
+            animation: fadeInUp 0.8s ease;
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 15px 20px;
+            font-weight: 600;
+        }
+        
+        #videoContainer {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+        }
+        
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #canvas {
+            display: none;
+        }
+        
+        .control-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn-custom {
+            border-radius: 25px;
+            padding: 10px 30px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            border: none;
+        }
+        
+        .btn-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        .btn-primary-custom {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        
+        .btn-success-custom {
+            background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+            color: white;
+        }
+        
+        .btn-danger-custom {
+            background: linear-gradient(135deg, #ff6b9d, #f06);
+            color: white;
+        }
+        
+        .emotion-result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 15px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            text-align: center;
+            display: none;
+            animation: bounceIn 0.6s ease;
+        }
+        
+        .emotion-icon {
+            font-size: 4rem;
+            margin-bottom: 10px;
+            animation: pulse 2s infinite;
+        }
+        
+        .emotion-name {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .confidence-bar {
+            background: rgba(255,255,255,0.3);
+            border-radius: 10px;
+            height: 30px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .confidence-fill {
+            background: white;
+            height: 100%;
+            transition: width 0.6s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+        
+        .probabilities-chart {
+            margin-top: 20px;
+        }
+        
+        .prob-item {
+            margin: 10px 0;
+        }
+        
+        .prob-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .prob-bar {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+        }
+        
+        .prob-fill {
+            height: 100%;
+            transition: width 0.6s ease;
+            border-radius: 10px;
+        }
+        
+        .ai-analysis {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            display: none;
+            animation: fadeIn 0.8s ease;
+        }
+        
+        .wellness-score {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .score-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0 auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .suggestions-list {
+            margin-top: 15px;
+        }
+        
+        .suggestion-item {
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin: 10px 0;
+            border-left: 4px solid var(--primary-color);
+        }
+        
+        .upload-zone {
+            border: 3px dashed #dee2e6;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-zone:hover {
+            border-color: var(--primary-color);
+            background: rgba(102, 126, 234, 0.05);
+        }
+        
+        .upload-zone i {
+            font-size: 3rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes bounceIn {
+            0% {
+                opacity: 0;
+                transform: scale(0.3);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        .nav-tabs .nav-link {
+            border-radius: 10px 10px 0 0;
+            color: #6c757d;
+            font-weight: 600;
+        }
+        
+        .nav-tabs .nav-link.active {
+            color: var(--primary-color);
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header">
+            <h1><i class="bi bi-emoji-smile"></i> 面部表情识别管理平台</h1>
+            <p>Facial Expression Recognition with AI Analysis</p>
+            <div class="mt-3">
+                <a href="/dashboard" class="btn btn-light btn-custom mx-2">
+                    <i class="bi bi-bar-chart"></i> 数据仪表板
+                </a>
+                <a href="/history" class="btn btn-light btn-custom mx-2">
+                    <i class="bi bi-clock-history"></i> 历史记录
+                </a>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 左侧：摄像头/上传 -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-camera-video"></i> 实时检测
+                    </div>
+                    <div class="card-body">
+                        <!-- 标签页 -->
+                        <ul class="nav nav-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="webcam-tab" data-bs-toggle="tab" data-bs-target="#webcam-panel" type="button">
+                                    <i class="bi bi-camera-video"></i> 摄像头
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-panel" type="button">
+                                    <i class="bi bi-cloud-upload"></i> 上传图片
+                                </button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content mt-3">
+                            <!-- 摄像头面板 -->
+                            <div class="tab-pane fade show active" id="webcam-panel">
+                                <div id="videoContainer">
+                                    <video id="webcam" autoplay playsinline></video>
+                                    <canvas id="canvas"></canvas>
+                                </div>
+                                
+                                <div class="control-buttons">
+                                    <button id="startCamera" class="btn btn-primary-custom btn-custom">
+                                        <i class="bi bi-camera"></i> 启动摄像头
+                                    </button>
+                                    <button id="captureBtn" class="btn btn-success-custom btn-custom" style="display: none;">
+                                        <i class="bi bi-camera-fill"></i> 捕捉表情
+                                    </button>
+                                    <button id="stopCamera" class="btn btn-danger-custom btn-custom" style="display: none;">
+                                        <i class="bi bi-stop-circle"></i> 停止摄像头
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 上传面板 -->
+                            <div class="tab-pane fade" id="upload-panel">
+                                <div class="upload-zone" id="uploadZone">
+                                    <i class="bi bi-cloud-upload"></i>
+                                    <h5>点击或拖拽上传图片</h5>
+                                    <p class="text-muted">支持 JPG、PNG 格式</p>
+                                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                                </div>
+                                <div id="uploadPreview" class="mt-3" style="display: none;">
+                                    <img id="previewImage" style="max-width: 100%; border-radius: 10px;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="loading">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">正在分析表情...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：结果显示 -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-clipboard-data"></i> 分析结果
+                    </div>
+                    <div class="card-body">
+                        <div id="resultPlaceholder" class="text-center text-muted py-5">
+                            <i class="bi bi-image" style="font-size: 4rem;"></i>
+                            <p class="mt-3">请捕捉或上传图片以开始分析</p>
+                        </div>
+
+                        <!-- 表情结果 -->
+                        <div id="emotionResult" class="emotion-result">
+                            <div class="emotion-icon" id="emotionIcon">😊</div>
+                            <div class="emotion-name" id="emotionName">快乐</div>
+                            <div class="confidence-bar">
+                                <div class="confidence-fill" id="confidenceFill">95%</div>
+                            </div>
+                            <small>置信度</small>
+                        </div>
+
+                        <!-- 概率分布 -->
+                        <div id="probabilitiesChart" class="probabilities-chart" style="display: none;">
+                            <h6 class="mb-3"><i class="bi bi-bar-chart"></i> 表情概率分布</h6>
+                            <div id="probItems"></div>
+                        </div>
+
+                        <!-- AI 分析 -->
+                        <div id="aiAnalysis" class="ai-analysis">
+                            <h5><i class="bi bi-lightbulb"></i> AI 情感分析</h5>
+                            
+                            <div class="wellness-score">
+                                <div class="score-circle" id="wellnessScore">85</div>
+                                <p class="mt-2 mb-0"><strong>心理健康评分</strong></p>
+                            </div>
+
+                            <div class="mt-3">
+                                <h6><i class="bi bi-chat-square-text"></i> 专业分析</h6>
+                                <p id="aiAnalysisText" class="text-muted"></p>
+                            </div>
+
+                            <div class="suggestions-list">
+                                <h6><i class="bi bi-star"></i> 情绪管理建议</h6>
+                                <div id="suggestionsList"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let stream = null;
+        let sessionId = 'web_' + Date.now();
+
+        // 启动摄像头
+        document.getElementById('startCamera').addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user' } 
+                });
+                document.getElementById('webcam').srcObject = stream;
+                document.getElementById('startCamera').style.display = 'none';
+                document.getElementById('captureBtn').style.display = 'inline-block';
+                document.getElementById('stopCamera').style.display = 'inline-block';
+            } catch (err) {
+                alert('无法访问摄像头: ' + err.message);
+            }
+        });
+
+        // 停止摄像头
+        document.getElementById('stopCamera').addEventListener('click', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                document.getElementById('webcam').srcObject = null;
+                document.getElementById('startCamera').style.display = 'inline-block';
+                document.getElementById('captureBtn').style.display = 'none';
+                document.getElementById('stopCamera').style.display = 'none';
+            }
+        });
+
+        // 捕捉表情
+        document.getElementById('captureBtn').addEventListener('click', () => {
+            const video = document.getElementById('webcam');
+            const canvas = document.getElementById('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            const imageData = canvas.toDataURL('image/jpeg');
+            analyzeEmotion(imageData);
+        });
+
+        // 上传区域
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.getElementById('previewImage');
+                    img.src = e.target.result;
+                    document.getElementById('uploadPreview').style.display = 'block';
+                    analyzeEmotion(e.target.result);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 拖放上传
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = '#667eea';
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.style.borderColor = '#dee2e6';
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.style.borderColor = '#dee2e6';
+            
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.getElementById('previewImage');
+                    img.src = e.target.result;
+                    document.getElementById('uploadPreview').style.display = 'block';
+                    analyzeEmotion(e.target.result);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 分析表情
+        async function analyzeEmotion(imageData) {
+            document.querySelector('.loading').style.display = 'block';
+            document.getElementById('resultPlaceholder').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,
+                        session_id: sessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResult(data);
+                } else {
+                    alert('分析失败: ' + (data.error || '未知错误'));
+                }
+            } catch (err) {
+                alert('请求失败: ' + err.message);
+            } finally {
+                document.querySelector('.loading').style.display = 'none';
+            }
+        }
+
+        // 显示结果
+        function displayResult(data) {
+            // 表情图标映射
+            const emotionEmojis = {
+                'angry': '😠',
+                'disgusted': '🤢',
+                'fearful': '😨',
+                'happy': '😊',
+                'sad': '😢',
+                'surprised': '😲',
+                'neutral': '😐'
+            };
+
+            // 显示主要表情
+            document.getElementById('emotionIcon').textContent = emotionEmojis[data.emotion];
+            document.getElementById('emotionName').textContent = data.emotion_cn;
+            document.getElementById('confidenceFill').textContent = (data.confidence * 100).toFixed(1) + '%';
+            document.getElementById('confidenceFill').style.width = (data.confidence * 100) + '%';
+            document.getElementById('emotionResult').style.display = 'block';
+
+            // 显示概率分布
+            const probItems = document.getElementById('probItems');
+            probItems.innerHTML = '';
+            
+            Object.entries(data.probabilities).forEach(([emotion, info]) => {
+                const item = document.createElement('div');
+                item.className = 'prob-item';
+                item.innerHTML = `
+                    <div class="prob-label">
+                        <span>${emotionEmojis[emotion]} ${info.name}</span>
+                        <span>${(info.value * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="prob-bar">
+                        <div class="prob-fill" style="width: ${info.value * 100}%; background: ${info.color};"></div>
+                    </div>
+                `;
+                probItems.appendChild(item);
+            });
+            document.getElementById('probabilitiesChart').style.display = 'block';
+
+            // 显示 AI 分析
+            if (data.ai_analysis) {
+                const ai = data.ai_analysis;
+                document.getElementById('wellnessScore').textContent = Math.round(ai.wellness_score);
+                document.getElementById('aiAnalysisText').textContent = ai.analysis;
+
+                const suggestionsList = document.getElementById('suggestionsList');
+                suggestionsList.innerHTML = '';
+                ai.suggestions.forEach(suggestion => {
+                    const item = document.createElement('div');
+                    item.className = 'suggestion-item';
+                    item.innerHTML = `<i class="bi bi-check-circle-fill text-success me-2"></i>${suggestion}`;
+                    suggestionsList.appendChild(item);
+                });
+
+                document.getElementById('aiAnalysis').style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>

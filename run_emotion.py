@@ -57,11 +57,14 @@ class OptimizedEmotionDetector:
         prototxt = os.path.join(BASE_DIR, "deploy.prototxt")
         model = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
 
-        if not os.path.exists(prototxt) or not os.path.exists(model):
-            print("❌ Face detector files not found")
-            exit(1)
-
-        self.dnn_net = cv2.dnn.readNetFromCaffe(prototxt, model)
+        self.use_dnn = False
+        if os.path.exists(prototxt) and os.path.exists(model):
+            self.dnn_net = cv2.dnn.readNetFromCaffe(prototxt, model)
+            self.use_dnn = True
+            print("✅ DNN Face detector loaded (Caffe SSD)")
+        else:
+            print("⚠️  DNN model files not found, using Haar Cascade")
+        
         self.haar_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
@@ -70,19 +73,21 @@ class OptimizedEmotionDetector:
     # Face detection
     def detect_faces(self, frame):
         faces = []
-        h, w = frame.shape[:2]
-        blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
-        self.dnn_net.setInput(blob)
-        detections = self.dnn_net.forward()
+        
+        if self.use_dnn:
+            h, w = frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
+            self.dnn_net.setInput(blob)
+            detections = self.dnn_net.forward()
 
-        for i in range(detections.shape[2]):
-            confidence = detections[0, 0, i, 2]
-            if confidence > 0.6:
-                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                x1, y1, x2, y2 = box.astype("int")
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w, x2), min(h, y2)
-                faces.append((x1, y1, x2 - x1, y2 - y1))
+            for i in range(detections.shape[2]):
+                confidence = detections[0, 0, i, 2]
+                if confidence > 0.6:
+                    box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                    x1, y1, x2, y2 = box.astype("int")
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    faces.append((x1, y1, x2 - x1, y2 - y1))
 
         if len(faces) == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
