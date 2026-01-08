@@ -223,16 +223,33 @@
             </div>
         </div>
 
-        <!-- 过滤器 -->
-        <div class="filter-buttons text-center">
-            <button class="filter-btn active" data-emotion="all">全部</button>
-            <button class="filter-btn" data-emotion="happy">😊 快乐</button>
-            <button class="filter-btn" data-emotion="sad">😢 悲伤</button>
-            <button class="filter-btn" data-emotion="angry">😠 愤怒</button>
-            <button class="filter-btn" data-emotion="surprised">😲 惊讶</button>
-            <button class="filter-btn" data-emotion="neutral">😐 中性</button>
-            <button class="filter-btn" data-emotion="fearful">😨 恐惧</button>
-            <button class="filter-btn" data-emotion="disgusted">🤢 厌恶</button>
+        <!-- 用户过滤器 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <label class="form-label"><i class="bi bi-person"></i> 按用户过滤:</label>
+                        <select class="form-select" id="userFilter" onchange="changeUserFilter()">
+                            <option value="">所有用户</option>
+                            <option value="current">仅我的记录</option>
+                            <option value="guest">访客记录</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><i class="bi bi-emoji-smile"></i> 按表情过滤:</label>
+                        <select class="form-select" id="emotionFilter" onchange="displayRecords()">
+                            <option value="all">全部表情</option>
+                            <option value="happy">😊 快乐</option>
+                            <option value="sad">😢 悲伤</option>
+                            <option value="angry">😠 愤怒</option>
+                            <option value="surprised">😲 惊讶</option>
+                            <option value="neutral">😐 中性</option>
+                            <option value="fearful">😨 恐惧</option>
+                            <option value="disgusted">🤢 厌恶</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 记录列表 -->
@@ -305,22 +322,20 @@
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             loadRecords();
-
-            // 过滤按钮
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    currentFilter = btn.dataset.emotion;
-                    displayRecords();
-                });
-            });
         });
+
+        // 改变用户过滤器
+        async function changeUserFilter() {
+            await loadRecords();
+        }
 
         // 加载记录
         async function loadRecords() {
             try {
-                const response = await fetch('/api/records?limit=100');
+                const userFilter = document.getElementById('userFilter').value;
+                const url = userFilter ? `/api/records?limit=100&user=${userFilter}` : '/api/records?limit=100';
+                
+                const response = await fetch(url);
                 const data = await response.json();
                 allRecords = data.records || [];
                 displayRecords();
@@ -338,10 +353,11 @@
         // 显示记录
         function displayRecords() {
             const container = document.getElementById('recordsContainer');
+            const emotionFilter = document.getElementById('emotionFilter').value;
             
             let filteredRecords = allRecords;
-            if (currentFilter !== 'all') {
-                filteredRecords = allRecords.filter(r => r.emotion === currentFilter);
+            if (emotionFilter !== 'all') {
+                filteredRecords = allRecords.filter(r => r.emotion === emotionFilter);
             }
 
             document.getElementById('recordCount').textContent = filteredRecords.length + ' 条记录';
@@ -383,6 +399,15 @@
                             <span class="confidence-badge ms-2">
                                 <i class="bi bi-graph-up"></i> ${(record.confidence * 100).toFixed(1)}%
                             </span>
+                            ${record.username && record.username !== 'guest' ? `
+                                <span class="badge bg-primary ms-2">
+                                    <i class="bi bi-person-check"></i> ${record.username}
+                                </span>
+                            ` : `
+                                <span class="badge bg-secondary ms-2">
+                                    <i class="bi bi-person"></i> 访客
+                                </span>
+                            `}
                         </div>
                         <div class="timestamp">
                             <i class="bi bi-clock"></i> ${dateStr}
@@ -495,7 +520,9 @@
 
         // 导出数据
         function exportData() {
-            window.location.href = '/api/export';
+            const userFilter = document.getElementById('userFilter').value;
+            const url = userFilter ? `/api/export?user=${userFilter}` : '/api/export';
+            window.location.href = url;
         }
     </script>
 </body>

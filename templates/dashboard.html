@@ -177,12 +177,29 @@
             </div>
         </div>
 
-        <!-- 时间选择器 -->
-        <div class="text-center time-selector">
-            <button class="time-btn" data-days="1">今天</button>
-            <button class="time-btn active" data-days="7">最近7天</button>
-            <button class="time-btn" data-days="30">最近30天</button>
-            <button class="time-btn" data-days="90">最近90天</button>
+        <!-- 用户过滤器 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <label class="form-label"><i class="bi bi-person"></i> 数据范围:</label>
+                        <select class="form-select" id="userFilter" onchange="loadStats()">
+                            <option value="">所有用户</option>
+                            <option value="current">仅我的数据</option>
+                            <option value="guest">访客数据</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label"><i class="bi bi-clock"></i> 时间范围:</label>
+                        <div class="btn-group w-100" role="group">
+                            <button type="button" class="btn btn-outline-primary time-btn-new" data-days="1">今天</button>
+                            <button type="button" class="btn btn-outline-primary time-btn-new active" data-days="7">最近7天</button>
+                            <button type="button" class="btn btn-outline-primary time-btn-new" data-days="30">最近30天</button>
+                            <button type="button" class="btn btn-outline-primary time-btn-new" data-days="90">最近90天</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 统计卡片 -->
@@ -201,6 +218,11 @@
                 <div class="stat-icon">🎯</div>
                 <div class="stat-value" id="avgConfidence">0%</div>
                 <div class="stat-label">平均置信度</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📅</div>
+                <div class="stat-value" id="records_24h">0</div>
+                <div class="stat-label">最近24小时</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon">💚</div>
@@ -233,6 +255,31 @@
                     <div class="card-body">
                         <div class="chart-container">
                             <canvas id="emotionLineChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 用户统计 -->
+            <div class="col-lg-12" id="userStatsSection" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-people"></i> 用户统计
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th><i class="bi bi-person"></i> 用户名</th>
+                                        <th><i class="bi bi-bar-chart"></i> 记录数</th>
+                                        <th><i class="bi bi-percent"></i> 占比</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="userStatsTable">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -342,18 +389,319 @@
 
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
-            loadStatistics(currentDays);
+            loadStats();
 
-            // 时间选择器
-            document.querySelectorAll('.time-btn').forEach(btn => {
+            // 新的时间选择器按钮
+            document.querySelectorAll('.time-btn-new').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.time-btn-new').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     currentDays = parseInt(btn.dataset.days);
-                    loadStatistics(currentDays);
+                    loadStats();
                 });
             });
         });
+
+        // 加载统计数据
+        async function loadStats() {
+            const userFilter = document.getElementById('userFilter').value;
+            const url = userFilter ? `/api/stats?user=${userFilter}` : '/api/stats';
+            
+            try {
+                document.getElementById('loadingOverlay').style.display = 'flex';
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                // 更新统计卡片
+                document.getElementById('totalRecords').textContent = data.total_records || 0;
+                document.getElementById('avgConfidence').textContent = (data.avg_confidence * 100).toFixed(1) + '%';
+                document.getElementById('records_24h').textContent = data.records_24h || 0;
+                
+                // 计算主导表情
+                let maxEmotion = Object.keys(data.emotion_counts).reduce((a, b) => 
+                    data.emotion_counts[a] > data.emotion_counts[b] ? a : b, 'neutral'
+                );
+                document.getElementById('dominantEmotion').textContent = 
+                    emotionEmojis[maxEmotion] + ' ' + emotionNamesCN[maxEmotion];
+                
+                // 计算积极情绪占比
+                const positiveEmotions = ['happy', 'surprised'];
+                const positiveCount = positiveEmotions.reduce((sum, e) => 
+                    sum + (data.emotion_counts[e] || 0), 0
+                );
+                const positiveRate = data.total_records > 0 ? 
+                    (positiveCount / data.total_records * 100).toFixed(1) : 0;
+                document.getElementById('positiveRate').textContent = positiveRate + '%';
+                
+                // 更新图表
+                updateCharts(data);
+                
+                // 更新用户统计表格（如果没有过滤用户）
+                if (!userFilter && data.user_stats && data.user_stats.length > 0) {
+                    document.getElementById('userStatsSection').style.display = 'block';
+                    updateUserStatsTable(data.user_stats, data.total_records);
+                } else {
+                    document.getElementById('userStatsSection').style.display = 'none';
+                }
+                
+                // 同时加载记录数据用于趋势等
+                loadRecordsForTrends(userFilter);
+                
+            } catch (err) {
+                console.error('加载统计数据失败:', err);
+            } finally {
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+
+        // 更新用户统计表格
+        function updateUserStatsTable(userStats, totalRecords) {
+            const tbody = document.getElementById('userStatsTable');
+            tbody.innerHTML = '';
+            
+            userStats.forEach(stat => {
+                const percentage = ((stat.count / totalRecords) * 100).toFixed(1);
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>
+                        ${stat.username === 'guest' ? 
+                            '<span class="badge bg-secondary"><i class="bi bi-person"></i> 访客</span>' :
+                            '<span class="badge bg-primary"><i class="bi bi-person-check"></i> ' + stat.username + '</span>'
+                        }
+                    </td>
+                    <td><strong>${stat.count}</strong></td>
+                    <td>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar" role="progressbar" style="width: ${percentage}%" 
+                                aria-valuenow="${percentage}" aria-valuemin="0" aria-valuemax="100">
+                                ${percentage}%
+                            </div>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // 更新图表
+        function updateCharts(data) {
+            // 准备数据
+            const emotions = Object.keys(data.emotion_counts);
+            const counts = Object.values(data.emotion_counts);
+            const labels = emotions.map(e => emotionNamesCN[e]);
+            const colors = emotions.map(e => emotionColors[e]);
+            
+            // 更新饼图
+            if (pieChart) pieChart.destroy();
+            const pieCtx = document.getElementById('emotionPieChart').getContext('2d');
+            pieChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: colors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // 加载记录用于趋势分析
+        async function loadRecordsForTrends(userFilter) {
+            const url = userFilter ? `/api/records?limit=1000&user=${userFilter}` : '/api/records?limit=1000';
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                const records = data.records || [];
+                
+                if (records.length === 0) return;
+                
+                // 按日期分组计算趋势
+                const dailyData = {};
+                records.forEach(record => {
+                    const date = record.timestamp.split('T')[0]; // 只取日期部分
+                    if (!dailyData[date]) {
+                        dailyData[date] = {};
+                    }
+                    if (!dailyData[date][record.emotion]) {
+                        dailyData[date][record.emotion] = 0;
+                    }
+                    dailyData[date][record.emotion]++;
+                });
+                
+                // 转换为趋势图所需格式
+                const dates = Object.keys(dailyData).sort();
+                const emotions = ['happy', 'sad', 'angry', 'surprised', 'neutral', 'fearful', 'disgusted'];
+                
+                // 更新折线图 - 趋势
+                if (lineChart) lineChart.destroy();
+                const lineCtx = document.getElementById('emotionLineChart').getContext('2d');
+                lineChart = new Chart(lineCtx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: emotions.map(emotion => {
+                            const emotionData = dates.map(date => {
+                                return dailyData[date][emotion] || 0;
+                            });
+                            
+                            return {
+                                label: emotionNamesCN[emotion],
+                                data: emotionData,
+                                borderColor: emotionColors[emotion],
+                                backgroundColor: emotionColors[emotion] + '20',
+                                tension: 0.4,
+                                fill: false
+                            };
+                        })
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                // 更新柱状图
+                const emotionCounts = {};
+                emotions.forEach(e => emotionCounts[e] = 0);
+                records.forEach(r => {
+                    if (emotionCounts.hasOwnProperty(r.emotion)) {
+                        emotionCounts[r.emotion]++;
+                    }
+                });
+                
+                if (barChart) barChart.destroy();
+                const barCtx = document.getElementById('emotionBarChart').getContext('2d');
+                barChart = new Chart(barCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: emotions.map(e => emotionNamesCN[e]),
+                        datasets: [{
+                            label: '检测次数',
+                            data: emotions.map(e => emotionCounts[e]),
+                            backgroundColor: emotions.map(e => emotionColors[e]),
+                            borderRadius: 10
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                // 更新雷达图
+                const totalCount = records.length;
+                const emotionScores = emotions.map(emotion => {
+                    const count = emotionCounts[emotion] || 0;
+                    return ((count / totalCount) * 100).toFixed(1);
+                });
+                
+                if (radarChart) radarChart.destroy();
+                const radarCtx = document.getElementById('radarChart').getContext('2d');
+                radarChart = new Chart(radarCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: emotions.map(e => emotionNamesCN[e]),
+                        datasets: [{
+                            label: '情绪分布',
+                            data: emotionScores,
+                            backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            pointBackgroundColor: 'rgba(102, 126, 234, 1)',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: 'rgba(102, 126, 234, 1)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                max: 100
+                            }
+                        }
+                    }
+                });
+                
+                // 更新统计表格
+                const sortedEmotions = emotions
+                    .map(e => ({
+                        emotion: e,
+                        count: emotionCounts[e],
+                        percentage: ((emotionCounts[e] / totalCount) * 100).toFixed(1)
+                    }))
+                    .filter(item => item.count > 0)
+                    .sort((a, b) => b.count - a.count);
+                
+                const tbody = document.getElementById('statsTable');
+                tbody.innerHTML = '';
+                
+                sortedEmotions.forEach((item, index) => {
+                    // 计算平均置信度
+                    const emotionRecords = records.filter(r => r.emotion === item.emotion);
+                    const avgConfidence = emotionRecords.reduce((sum, r) => sum + r.confidence, 0) / emotionRecords.length;
+                    
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>
+                            <span style="font-size: 1.5rem;">${emotionEmojis[item.emotion]}</span>
+                            <strong class="ms-2">${emotionNamesCN[item.emotion]}</strong>
+                        </td>
+                        <td><strong>${item.count}</strong></td>
+                        <td>${(avgConfidence * 100).toFixed(1)}%</td>
+                        <td>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar" role="progressbar" 
+                                     style="width: ${item.percentage}%; background-color: ${emotionColors[item.emotion]};"
+                                     aria-valuenow="${item.percentage}" aria-valuemin="0" aria-valuemax="100">
+                                    ${item.percentage}%
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            ${index === 0 ? '📈 主导' : index < 3 ? '➡️ 中等' : '📉 较少'}
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                
+            } catch (err) {
+                console.error('加载记录失败:', err);
+            }
+        }
 
         // 加载统计数据
         async function loadStatistics(days) {
