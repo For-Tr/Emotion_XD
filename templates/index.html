@@ -484,9 +484,92 @@
     <script>
         let stream = null;
         let sessionId = 'web_' + Date.now();
+        let isPiCamera = false;
+        let lastLoggedTimestamp = 0;
 
-        // 启动摄像头
+        // 检查树莓派摄像头状态
+        async function checkPiCamera() {
+            try {
+                const response = await fetch('/api/camera_status');
+                const status = await response.json();
+                return status.picamera_available && status.camera_initialized;
+            } catch (err) {
+                console.log('检查树莓派摄像头失败:', err);
+                return false;
+            }
+        }
+
+        // 初始化时检查摄像头类型
+        async function initCamera() {
+            isPiCamera = await checkPiCamera();
+            
+            if (isPiCamera) {
+                console.log('检测到树莓派摄像头，使用后端视频流');
+                // 自动启动树莓派摄像头
+                const videoElement = document.getElementById('webcam');
+                videoElement.innerHTML = '';
+                const img = document.createElement('img');
+                img.src = '/video_feed';
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'cover';
+                videoElement.parentNode.replaceChild(img, videoElement);
+                img.id = 'webcam';
+                
+                document.getElementById('startCamera').style.display = 'none';
+                document.getElementById('captureBtn').style.display = 'inline-block';
+                document.getElementById('stopCamera').style.display = 'none';
+                
+                // 启动实时表情检测
+                startEmotionPolling();
+            } else {
+                console.log('使用浏览器摄像头');
+            }
+        }
+
+        // 实时表情检测轮询（仅用于树莓派摄像头）
+        async function startEmotionPolling() {
+            if (!isPiCamera) return;
+            
+            setInterval(async () => {
+                try {
+                    const resp = await fetch('/emotion_probs');
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    displayResult(data);
+                    
+                    // 记录日志
+                    if (data.emotion && data.timestamp) {
+                        const ts = new Date(data.timestamp).getTime();
+                        if (ts !== lastLoggedTimestamp) {
+                            lastLoggedTimestamp = ts;
+                            await fetch('/api/log_emotion', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    session_id: sessionId,
+                                    emotion: data.emotion,
+                                    confidence: data.confidence,
+                                    probabilities: data.probabilities,
+                                    ai_analysis: data.ai_analysis,
+                                    timestamp: data.timestamp
+                                })
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error('实时表情检测失败:', err);
+                }
+            }, 1000);
+        }
+
+        // 启动摄像头（浏览器模式）
         document.getElementById('startCamera').addEventListener('click', async () => {
+            if (isPiCamera) {
+                // 树莓派摄像头已经在运行
+                return;
+            }
+            
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'user' } 
@@ -500,7 +583,7 @@
             }
         });
 
-        // 停止摄像头
+        // 停止摄像头（浏览器模式）
         document.getElementById('stopCamera').addEventListener('click', () => {
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
@@ -512,18 +595,60 @@
         });
 
         // 捕捉表情
-        document.getElementById('captureBtn').addEventListener('click', () => {
-            const video = document.getElementById('webcam');
-            const canvas = document.getElementById('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0);
-            
-            const imageData = canvas.toDataURL('image/jpeg');
-            analyzeEmotion(imageData);
+        document.getElementById('captureBtn').addEventListener('click', async () => {
+            if (isPiCamera) {
+                // 树莓派摄像头模式：调用后端接口捕获帧
+                document.querySelector('.loading').style.display = 'block';
+                document.getElementById('resultPlaceholder').style.display = 'none';
+                
+                try {
+                    const response = await fetch('/api/capture_frame', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: sessionId })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        displayResult(data);
+                        
+                        // 显示捕获的图片
+                        const webcamPanel = document.getElementById('webcam-panel');
+                        let existingImg = document.getElementById('capturedImage');
+                        if (!existingImg) {
+                            existingImg = document.createElement('img');
+                            existingImg.id = 'capturedImage';
+                            existingImg.style.maxWidth = '100%';
+                            existingImg.style.borderRadius = '10px';
+                            existingImg.className = 'mt-3';
+                            webcamPanel.appendChild(existingImg);
+                        }
+                        existingImg.src = data.image_url + '?t=' + new Date().getTime();
+                    } else {
+                        alert('拍照分析失败: ' + (data.error || '未知错误'));
+                    }
+                } catch (err) {
+                    alert('请求出错: ' + err.message);
+                } finally {
+                    document.querySelector('.loading').style.display = 'none';
+                }
+            } else {
+                // 浏览器摄像头模式：从 video 元素捕获
+                const video = document.getElementById('webcam');
+                const canvas = document.getElementById('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                
+                const imageData = canvas.toDataURL('image/jpeg');
+                analyzeEmotion(imageData);
+            }
         });
+
+        // 页面加载时初始化
+        window.addEventListener('DOMContentLoaded', initCamera);
 
         // 上传区域
         const uploadZone = document.getElementById('uploadZone');
@@ -605,14 +730,14 @@
 
         // 显示结果
         function displayResult(data) {
-            // 表情图标映射
+            // 表情图标映射（匹配后端EMOTIONS数组）
             const emotionEmojis = {
                 'angry': '😠',
-                'disgusted': '🤢',
-                'fearful': '😨',
+                'disgust': '🤢',
+                'fear': '😨',
                 'happy': '😊',
                 'sad': '😢',
-                'surprised': '😲',
+                'surprise': '😲',
                 'neutral': '😐'
             };
 

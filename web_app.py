@@ -16,11 +16,28 @@ import hashlib
 
 import cv2
 import numpy as np
-from flask import Flask, render_template, request, jsonify, Response, session
+import threading
+from flask import Flask, render_template, request, jsonify, Response, session, send_from_directory
 from keras.models import model_from_json
 
-# 导入原有的检测器和对齐函数
-from run_emotion import OptimizedEmotionDetector, align_and_crop_face
+# 尝试导入树莓派摄像头支持
+PICAMERA_AVAILABLE = False
+try:
+    from picamera2 import Picamera2
+    PICAMERA_AVAILABLE = True
+    print("[✓] Picamera2 支持已启用")
+except ImportError:
+    print("[!] Picamera2 未安装，将使用浏览器摄像头")
+
+# 尝试使用树莓派优化的模型，否则回退到标准模型
+try:
+    from run_emotion_pi4 import EmotionDetectorPi, align_and_crop_face
+    USE_PI_MODEL = True
+    print("[✓] 使用树莓派优化模型 (TFLite)")
+except ImportError:
+    from run_emotion import OptimizedEmotionDetector, align_and_crop_face
+    USE_PI_MODEL = False
+    print("[!] 使用标准 Keras 模型")
 
 # 导入人脸识别系统
 try:
@@ -51,6 +68,14 @@ FACE_DB_PATH = 'database/faces_db'
 # 加载模型
 detector = None
 face_recognizer = None
+
+# 树莓派摄像头全局变量
+picam2 = None
+latest_frame = None
+frame_lock = threading.Lock()
+latest_emotion = None
+emotion_lock = threading.Lock()
+predict_lock = threading.Lock()
 
 def init_db():
     """初始化数据库"""
@@ -142,7 +167,10 @@ def load_detector():
     global detector
     if detector is None:
         print("[*] 正在加载表情识别模型...")
-        detector = OptimizedEmotionDetector()
+        if USE_PI_MODEL:
+            detector = EmotionDetectorPi()
+        else:
+            detector = OptimizedEmotionDetector()
         print("[✓] 模型加载成功！")
     return detector
 
@@ -160,6 +188,25 @@ def load_face_recognizer():
             face_recognizer = None
     return face_recognizer
 
+def detect_faces_unified(image):
+    """
+    统一的人脸检测函数，自动适配不同的检测器
+    image: BGR 彩色图像
+    返回: faces (list of (x, y, w, h)), gray_image
+    """
+    det = load_detector()
+    
+    if USE_PI_MODEL:
+        # 使用树莓派模型的检测器
+        faces, gray = det.detect_faces(image)
+        return faces, gray
+    else:
+        # 使用标准的 Haar Cascade 检测器
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+        return faces, gray
+
 def predict_emotion(image):
     """
     预测表情
@@ -169,7 +216,11 @@ def predict_emotion(image):
     det = load_detector()
     
     # 检测人脸
-    faces = det.detect_faces(image)
+    if USE_PI_MODEL:
+        faces, gray = det.detect_faces(image)
+    else:
+        faces = det.detect_faces(image)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
     if len(faces) == 0:
         return None, None, None, None
@@ -178,24 +229,35 @@ def predict_emotion(image):
     face = max(faces, key=lambda f: f[2] * f[3])
     x, y, w, h = face
     
-    # 转灰度图
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
     # 对齐和裁剪
     face_roi = align_and_crop_face(gray, face)
     
     if face_roi is None:
         return None, None, None, None
     
+    # 调整大小到 48x48
+    face48 = cv2.resize(face_roi, (48, 48))
+    face48_copy = face48.copy()
+    
     # 预测
-    probabilities = det.predict_emotion(face_roi)
+    if USE_PI_MODEL:
+        with predict_lock:
+            probabilities = det.predict(face48_copy)
+    else:
+        probabilities = det.predict_emotion(face48_copy)
+    
+    # 确保概率格式正确
+    if len(probabilities) != len(EMOTIONS):
+        probabilities = np.zeros(len(EMOTIONS), dtype=float)
+    else:
+        probabilities = [0.0 if (p is None or np.isnan(p)) else float(p) for p in probabilities]
     
     # 获取最高概率的情绪
-    emotion_idx = np.argmax(probabilities)
+    emotion_idx = int(np.argmax(probabilities))
     emotion = EMOTIONS[emotion_idx]
     confidence = float(probabilities[emotion_idx])
     
-    return emotion, confidence, probabilities.tolist(), face
+    return emotion, confidence, probabilities if isinstance(probabilities, list) else probabilities.tolist(), face
 
 def get_ai_analysis(emotion, confidence):
     """AI 情感分析"""
@@ -817,10 +879,8 @@ def api_register_face():
                 if image is None:
                     continue
                 
-                # 检测人脸
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-                faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+                # 使用统一的人脸检测函数
+                faces, gray = detect_faces_unified(image)
                 
                 if len(faces) == 0:
                     continue
@@ -875,10 +935,8 @@ def api_login_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # 检测人脸
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+        # 使用统一的人脸检测函数
+        faces, gray = detect_faces_unified(image)
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
@@ -945,10 +1003,8 @@ def api_recognize_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # 检测人脸
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+        # 使用统一的人脸检测函数
+        faces, gray = detect_faces_unified(image)
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
@@ -1006,6 +1062,238 @@ def api_current_user():
     
     return jsonify({'logged_in': False, 'user': None})
 
+# ==================== 树莓派摄像头支持 ====================
+
+def init_picamera():
+    """初始化树莓派摄像头"""
+    global picam2
+    if PICAMERA_AVAILABLE and picam2 is None:
+        try:
+            print("[*] 正在初始化树莓派摄像头...")
+            picam2 = Picamera2()
+            picam2.start()
+            print("[✓] 树莓派摄像头初始化成功！")
+            return True
+        except Exception as e:
+            print(f"[!] 树莓派摄像头初始化失败: {e}")
+            picam2 = None
+            return False
+    return picam2 is not None
+
+def camera_capture_thread():
+    """摄像头捕获线程"""
+    global latest_frame
+    if not init_picamera():
+        print("[!] 摄像头捕获线程未启动")
+        return
+    
+    print("[*] 摄像头捕获线程已启动")
+    while True:
+        try:
+            frame = picam2.capture_array()  # 获取一帧 RGB 图像
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            with frame_lock:
+                latest_frame = frame_bgr
+            time.sleep(0.03)  # 控制抓帧间隔 ~30ms => 33 FPS
+        except Exception as e:
+            print(f"[!] 摄像头捕获错误: {e}")
+            time.sleep(0.1)
+
+def emotion_inference_thread():
+    """表情推理线程"""
+    global latest_frame, latest_emotion
+    det = load_detector()
+    print("[*] 表情推理线程已启动")
+    
+    while True:
+        try:
+            with frame_lock:
+                if latest_frame is None:
+                    time.sleep(0.01)
+                    continue
+                frame_copy = latest_frame.copy()
+
+            emotion, confidence, probabilities, face_coords = predict_emotion(frame_copy)
+            if emotion is not None:
+                ai_analysis = get_ai_analysis(emotion, confidence)
+                with emotion_lock:
+                    latest_emotion = {
+                        'emotion': emotion,
+                        'confidence': confidence,
+                        'probabilities': probabilities,
+                        'ai_analysis': ai_analysis,
+                        'frame': frame_copy.copy()
+                    }
+            time.sleep(0.03)  # 每秒约 30 FPS 推理上限
+        except Exception as e:
+            print(f"[!] 表情推理错误: {e}")
+            time.sleep(0.1)
+
+def gen_frames():
+    """生成视频帧"""
+    global latest_frame
+    while True:
+        with frame_lock:
+            if latest_frame is None:
+                time.sleep(0.01)
+                continue
+            frame = latest_frame.copy()
+        
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    """视频流路由"""
+    if not PICAMERA_AVAILABLE:
+        return jsonify({'error': '树莓派摄像头不可用'}), 503
+    
+    return Response(gen_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/emotion_probs')
+def emotion_probs():
+    """获取最新的表情概率"""
+    global latest_emotion
+    
+    with emotion_lock:
+        if latest_emotion is None:
+            return jsonify({}), 503
+        
+        emotion_data = latest_emotion.copy()
+        # 移除 frame，减少传输数据
+        emotion_data.pop('frame', None)
+    
+    # 格式化概率数据
+    probabilities_dict = {
+        EMOTIONS[i]: {
+            'name': EMOTIONS_CN[i],
+            'value': float(emotion_data['probabilities'][i]),
+            'color': EMOTION_COLORS[i]
+        } for i in range(len(EMOTIONS))
+    }
+    
+    return jsonify({
+        'emotion': emotion_data['emotion'],
+        'emotion_cn': EMOTIONS_CN[EMOTIONS.index(emotion_data['emotion'])],
+        'confidence': emotion_data['confidence'],
+        'probabilities': probabilities_dict,
+        'ai_analysis': emotion_data['ai_analysis'],
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/capture_frame', methods=['POST'])
+def api_capture_frame():
+    """捕获当前帧并分析"""
+    global latest_frame
+    
+    if latest_frame is None:
+        return jsonify({'error': 'No frame available yet'}), 503
+
+    with frame_lock:
+        frame_copy = latest_frame.copy()
+
+    emotion, confidence, probabilities, face_coords = predict_emotion(frame_copy)
+    if emotion is None:
+        return jsonify({'error': 'No face detected'}), 404
+
+    ai_analysis = get_ai_analysis(emotion, confidence)
+
+    # 保存图片
+    timestamp = int(time.time())
+    image_filename = f'capture_{timestamp}.jpg'
+    image_path = image_filename   
+    full_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
+    cv2.imwrite(full_path, frame_copy)
+
+    # 生成 base64 图片数据（用于注册/登录页面）
+    _, buffer = cv2.imencode('.jpg', frame_copy)
+    image_base64 = 'data:image/jpeg;base64,' + base64.b64encode(buffer).decode('utf-8')
+
+    # 获取当前用户信息
+    user_id = session.get('user_id', None)
+    username = session.get('username', 'guest')
+
+    # 保存记录
+    record_id = save_emotion_record(
+        emotion, confidence, probabilities,
+        image_path=image_path, ai_analysis=ai_analysis,
+        session_id=f'capture_{timestamp}',
+        user_id=user_id, username=username
+    )
+
+    return jsonify({
+        'success': True,
+        'record_id': record_id,
+        'emotion': emotion,
+        'emotion_cn': EMOTIONS_CN[EMOTIONS.index(emotion)],
+        'confidence': confidence,
+        'probabilities': {
+            EMOTIONS[i]: {
+                'name': EMOTIONS_CN[i],
+                'value': float(probabilities[i]),
+                'color': EMOTION_COLORS[i]
+            }
+            for i in range(len(EMOTIONS))
+        },
+        'ai_analysis': ai_analysis,
+        'image_url': f"/uploads/{image_filename}",
+        'image_base64': image_base64,  # 添加 base64 数据
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/uploads/<path:filename>')
+def serve_uploads(filename):
+    """提供上传文件访问"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/api/log_emotion', methods=['POST'])
+def api_log_emotion():
+    """记录表情日志"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        emotion = data.get('emotion')
+        confidence = data.get('confidence')
+        probabilities = data.get('probabilities', [])
+        session_id = data.get('session_id', f'web_{int(time.time())}')
+        ai_analysis = data.get('ai_analysis', {})
+
+        if emotion is None or confidence is None:
+            return jsonify({'error': 'Missing emotion or confidence'}), 400
+
+        # 获取当前用户信息
+        user_id = session.get('user_id', None)
+        username = session.get('username', 'guest')
+
+        record_id = save_emotion_record(
+            emotion, confidence, probabilities,
+            ai_analysis=ai_analysis, session_id=session_id,
+            user_id=user_id, username=username
+        )
+
+        return jsonify({'status': 'success', 'record_id': record_id})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/camera_status')
+def api_camera_status():
+    """检查摄像头状态"""
+    return jsonify({
+        'picamera_available': PICAMERA_AVAILABLE,
+        'camera_initialized': picam2 is not None,
+        'use_pi_model': USE_PI_MODEL
+    })
+
 if __name__ == '__main__':
     # 初始化数据库
     init_db()
@@ -1015,6 +1303,15 @@ if __name__ == '__main__':
     load_detector()
     load_face_recognizer()
     
+    # 启动树莓派摄像头线程（如果可用）
+    if PICAMERA_AVAILABLE:
+        print("[*] 启动树莓派摄像头线程...")
+        threading.Thread(target=camera_capture_thread, daemon=True).start()
+        threading.Thread(target=emotion_inference_thread, daemon=True).start()
+        print("[✓] 树莓派摄像头线程已启动")
+    else:
+        print("[!] 树莓派摄像头不可用，将使用浏览器摄像头")
+    
     print("\n" + "="*60)
     print("  面部表情识别管理平台")
     print("  基于训练好的 FER CNN 模型")
@@ -1023,8 +1320,21 @@ if __name__ == '__main__':
     print("[✓] 访问地址: http://localhost:5002")
     print("[✓] 数据仪表板: http://localhost:5002/dashboard")
     print("[✓] 历史记录: http://localhost:5002/history")
-    print("\n[✓] 使用真实训练的深度学习模型")
-    print("[✓] 模型文件: fer.weights.h5")
+    print("[✓] 用户中心: http://localhost:5002/user")
+    
+    if USE_PI_MODEL:
+        print("\n[✓] 使用树莓派优化模型 (TFLite)")
+        print("[✓] 模型文件: fer_pi4.tflite 或 fer.tflite")
+    else:
+        print("\n[✓] 使用标准深度学习模型")
+        print("[✓] 模型文件: fer.weights.h5")
+    
+    if PICAMERA_AVAILABLE:
+        print("[✓] 树莓派摄像头: 已启用")
+        print("[✓] 视频流: http://localhost:5002/video_feed")
+    else:
+        print("[!] 树莓派摄像头: 未启用，使用浏览器摄像头")
+    
     print("\n按 Ctrl+C 停止服务器\n")
     
-    app.run(host='0.0.0.0', port=5002, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5002, debug=False, threaded=True)
