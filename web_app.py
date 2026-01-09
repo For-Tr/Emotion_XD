@@ -132,7 +132,7 @@ def init_db():
             session_id TEXT UNIQUE NOT NULL,
             user_id INTEGER,
             username TEXT DEFAULT 'guest',
-            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            start_time DATETIME DEFAULT (datetime('now', '+8 hours')),
             end_time DATETIME,
             total_detections INTEGER DEFAULT 0,
             dominant_emotion TEXT,

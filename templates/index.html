@@ -482,6 +482,7 @@
         let stream = null;
         let sessionId = 'web_' + Date.now();
         let isPiCamera = false;
+        let emotionPollingInterval = null;  // 用于存储轮询定时器
 
         // 检查树莓派摄像头状态
         async function checkPiCamera() {
@@ -524,20 +525,45 @@
         }
 
         // 实时表情检测轮询（仅用于树莓派摄像头，不保存记录）
-        async function startEmotionPolling() {
+        function startEmotionPolling() {
             if (!isPiCamera) return;
             
-            setInterval(async () => {
+            // 先停止已有的轮询
+            stopEmotionPolling();
+            
+            emotionPollingInterval = setInterval(async () => {
                 try {
                     const resp = await fetch('/emotion_probs');
-                    if (!resp.ok) return;
+                    if (!resp.ok) {
+                        // 没有检测到人脸，显示提示
+                        showNoFaceDetected();
+                        return;
+                    }
                     const data = await resp.json();
-                    // 只显示结果，不保存记录
+                    
+                    // 检查是否有有效数据
+                    if (!data || !data.emotion) {
+                        showNoFaceDetected();
+                        return;
+                    }
+                    
+                    // 显示检测结果
                     displayResult(data);
                 } catch (err) {
                     console.error('实时表情检测失败:', err);
+                    showNoFaceDetected();
                 }
             }, 1000);
+            console.log('[INFO] 实时表情检测已启动');
+        }
+        
+        // 停止实时表情检测
+        function stopEmotionPolling() {
+            if (emotionPollingInterval) {
+                clearInterval(emotionPollingInterval);
+                emotionPollingInterval = null;
+                console.log('[INFO] 实时表情检测已停止');
+            }
         }
 
         // 启动摄像头（浏览器模式）
@@ -562,6 +588,12 @@
 
         // 停止摄像头（浏览器模式）
         document.getElementById('stopCamera').addEventListener('click', () => {
+            stopCameraAndPolling();
+        });
+        
+        // 停止摄像头和实时检测的通用函数
+        function stopCameraAndPolling() {
+            // 停止浏览器摄像头
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 document.getElementById('webcam').srcObject = null;
@@ -569,7 +601,10 @@
                 document.getElementById('captureBtn').style.display = 'none';
                 document.getElementById('stopCamera').style.display = 'none';
             }
-        });
+            
+            // 停止实时表情检测（树莓派模式）
+            stopEmotionPolling();
+        }
 
         // 捕捉表情
         document.getElementById('captureBtn').addEventListener('click', async () => {
@@ -626,6 +661,21 @@
 
         // 页面加载时初始化
         window.addEventListener('DOMContentLoaded', initCamera);
+        
+        // 监听标签页切换事件
+        document.getElementById('webcam-tab').addEventListener('shown.bs.tab', function (e) {
+            console.log('[INFO] 切换到摄像头标签页');
+            // 切换回摄像头标签页时，如果是树莓派摄像头，重新启动实时检测
+            if (isPiCamera) {
+                startEmotionPolling();
+            }
+        });
+        
+        document.getElementById('upload-tab').addEventListener('shown.bs.tab', function (e) {
+            console.log('[INFO] 切换到上传图片标签页');
+            // 切换到上传标签页时，停止摄像头和实时检测
+            stopCameraAndPolling();
+        });
 
         // 上传区域
         const uploadZone = document.getElementById('uploadZone');
@@ -709,8 +759,28 @@
             }
         }
 
+        // 显示"未检测到人脸"
+        function showNoFaceDetected() {
+            // 隐藏结果区域
+            document.getElementById('emotionResult').style.display = 'none';
+            document.getElementById('probabilitiesChart').style.display = 'none';
+            document.getElementById('aiAnalysis').style.display = 'none';
+            
+            // 显示占位符
+            const placeholder = document.getElementById('resultPlaceholder');
+            placeholder.innerHTML = `
+                <i class="bi bi-person-x" style="font-size: 4rem; color: #6c757d;"></i>
+                <p class="mt-3 text-muted">未检测到人脸</p>
+                <p class="text-muted small">请将面部对准摄像头</p>
+            `;
+            placeholder.style.display = 'block';
+        }
+
         // 显示结果
         function displayResult(data) {
+            // 隐藏占位符
+            document.getElementById('resultPlaceholder').style.display = 'none';
+            
             // 表情图标映射（匹配后端EMOTIONS数组）
             const emotionEmojis = {
                 'angry': '😠',
