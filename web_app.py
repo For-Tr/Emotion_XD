@@ -113,7 +113,7 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS emotion_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            timestamp DATETIME DEFAULT (datetime('now', '+8 hours')),
             user_id INTEGER,
             username TEXT DEFAULT 'guest',
             emotion TEXT NOT NULL,
@@ -346,11 +346,14 @@ def save_emotion_record(emotion, confidence, probabilities, image_path=None, ai_
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # 使用本地时间（datetime.now() 已经是系统的本地时间）
+    local_time = datetime.now().isoformat()
+    
     cursor.execute('''
         INSERT INTO emotion_records 
-        (emotion, confidence, all_probabilities, image_path, ai_analysis, session_id, user_id, username)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (emotion, confidence, json.dumps(probabilities), image_path, 
+        (timestamp, emotion, confidence, all_probabilities, image_path, ai_analysis, session_id, user_id, username)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (local_time, emotion, confidence, json.dumps(probabilities), image_path, 
           json.dumps(ai_analysis) if ai_analysis else None, session_id, user_id, username))
     
     conn.commit()
@@ -1154,7 +1157,8 @@ def emotion_inference_thread():
                 frame_copy = latest_frame.copy()
 
             emotion, confidence, probabilities, face_coords = predict_emotion(frame_copy)
-            if emotion is not None:
+            # 只有在检测到人脸时才更新表情数据
+            if emotion is not None and face_coords is not None:
                 ai_analysis = get_ai_analysis(emotion, confidence)
                 with emotion_lock:
                     latest_emotion = {
@@ -1164,6 +1168,10 @@ def emotion_inference_thread():
                         'ai_analysis': ai_analysis,
                         'frame': frame_copy.copy()
                     }
+            else:
+                # 未检测到人脸时，清空表情数据
+                with emotion_lock:
+                    latest_emotion = None
             time.sleep(0.03)  # 每秒约 30 FPS 推理上限
         except Exception as e:
             print(f"[!] 表情推理错误: {e}")
