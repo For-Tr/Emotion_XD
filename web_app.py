@@ -251,8 +251,6 @@ def predict_emotion(image, use_faceid_crop=True):
     recognized_user = None
     recognized_distance = None
     
-    print(f"[DEBUG] predict_emotion: use_faceid_crop={use_faceid_crop}, recognizer={recognizer is not None}")
-    
     if use_faceid_crop and recognizer is not None:
         try:
             # 1. 先使用表情检测器找到人脸位置
@@ -279,26 +277,20 @@ def predict_emotion(image, use_faceid_crop=True):
                 # 裁剪人脸区域（与注册时保持一致，不加边距）
                 try:
                     face_img_rgb = image[y:y+h, x:x+w]
-                except Exception as e:
-                    print(f"[!] 裁剪图像失败: {e}, coords: x={x}, y={y}, w={w}, h={h}, img_shape={image.shape}")
+                except Exception:
                     face_img_rgb = None
                 
                 if face_img_rgb is not None and face_img_rgb.size > 0:
                     # 3. 尝试识别用户身份
                     try:
                         recognized_user, recognized_distance = recognizer.recognize(face_img_rgb)
-                        print(f"[DEBUG] 人脸识别结果: {recognized_user}, 距离: {recognized_distance:.3f}")
                     except Exception as e:
-                        print(f"[!] 人脸识别失败: {e}")
-                        import traceback
-                        traceback.print_exc()
                         recognized_user = "Unknown"
                         recognized_distance = 1.0
                     
                     # 4. 将人脸识别裁剪的图片转为灰度图用于表情识别
                     face_crop_for_emotion = cv2.cvtColor(face_img_rgb, cv2.COLOR_BGR2GRAY)
-        except Exception as e:
-            print(f"[!] 人脸识别裁剪失败，回退到标准检测: {e}")
+        except Exception:
             face_crop_for_emotion = None
     
     # 如果人脸识别裁剪失败，使用原始的检测方法
@@ -329,8 +321,7 @@ def predict_emotion(image, use_faceid_crop=True):
         # 对齐和裁剪
         try:
             face_crop_for_emotion = align_and_crop_face(gray, face)
-        except Exception as e:
-            print(f"[!] align_and_crop_face 失败: {e}, face={face}, gray_shape={gray.shape}")
+        except Exception:
             face_crop_for_emotion = None
     
     if face_crop_for_emotion is None:
@@ -573,18 +564,12 @@ def api_predict():
         username = 'guest'
         recognized = False
         
-        print(f"[DEBUG] API 收到识别结果: recognized_name={recognized_name}, distance={distance}")
-        
         if recognized_name is not None and recognized_name != "Unknown":
             user = get_user_by_username(recognized_name)
-            print(f"[DEBUG] 从数据库查询用户: {user}")
             if user:
                 user_id = user['id']
                 username = user['username']
                 recognized = True
-                print(f"[DEBUG] 用户识别成功: user_id={user_id}, username={username}")
-        else:
-            print(f"[DEBUG] 未识别到用户，使用访客身份")
         
         # AI 分析
         ai_analysis = get_ai_analysis(emotion, confidence)
@@ -663,7 +648,6 @@ def api_upload():
                 return jsonify({'error': '图片尺寸太小'}), 400
             
             if image.shape[0] > 10000 or image.shape[1] > 10000:
-                print(f"[!] 图片尺寸过大: {image.shape}，将进行缩放")
                 # 缩放过大的图片
                 max_dim = 2000
                 h, w = image.shape[:2]
@@ -672,20 +656,13 @@ def api_upload():
                     new_w = int(w * scale)
                     new_h = int(h * scale)
                     image = cv2.resize(image, (new_w, new_h))
-                    print(f"[✓] 图片已缩放到: {image.shape}")
         except Exception as e:
-            print(f"[!] 读取或处理图片失败: {e}")
-            import traceback
-            traceback.print_exc()
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
         
         # 预测表情（现在会自动使用人脸识别模型裁剪）
         try:
             emotion, confidence, probabilities, face_coords, recognized_name, distance = predict_emotion(image)
         except Exception as e:
-            print(f"[!] predict_emotion 发生异常: {e}")
-            import traceback
-            traceback.print_exc()
             return jsonify({'error': f'表情识别失败: {str(e)}'}), 500
         
         if emotion is None:
@@ -1361,21 +1338,15 @@ def api_capture_frame():
     _, buffer = cv2.imencode('.jpg', frame_copy)
     image_base64 = 'data:image/jpeg;base64,' + base64.b64encode(buffer).decode('utf-8')
 
-    # 处理用户识别结果（优先使用人脸识别结果，而不是 session）
+    # 处理用户识别结果(优先使用人脸识别结果,而不是 session)
     user_id = None
     username = 'guest'
     
-    print(f"[DEBUG] capture_frame 识别结果: recognized_name={recognized_name}, distance={distance}")
-    
     if recognized_name is not None and recognized_name != "Unknown":
         user = get_user_by_username(recognized_name)
-        print(f"[DEBUG] capture_frame 查询用户: {user}")
         if user:
             user_id = user['id']
             username = user['username']
-            print(f"[DEBUG] capture_frame 用户确认: user_id={user_id}, username={username}")
-    else:
-        print(f"[DEBUG] capture_frame 未识别到用户，使用访客身份")
 
     # 保存记录
     record_id = save_emotion_record(
