@@ -919,14 +919,22 @@ def api_register_face():
                 if image is None:
                     continue
                 
-                # 使用统一的人脸检测函数
-                faces, gray = detect_faces_unified(image)
+                # ★ 人脸注册专用检测：不使用表情识别的预处理
+                # 直接使用 Haar Cascade 检测，确保获取原始尺寸的人脸区域
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
                 
                 if len(faces) == 0:
                     continue
                 
-                # 取第一个检测到的人脸
-                x, y, w, h = faces[0]
+                # 取最大的人脸（原始检测框）
+                face = max(faces, key=lambda f: f[2] * f[3])
+                x, y, w, h = face
+                
+                # ★ 关键：从彩色原图提取人脸区域，不经过任何缩放
+                # 这样 face_img 保持原始检测框的尺寸（通常 200-300 像素）
+                # 人脸识别的 embed() 函数会在内部调整为 112x112
                 face_img = image[y:y+h, x:x+w]
                 
                 # 添加到人脸识别系统
@@ -975,14 +983,19 @@ def api_login_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # 使用统一的人脸检测函数
-        faces, gray = detect_faces_unified(image)
+        # ★ 人脸识别专用检测：直接使用 Haar Cascade，避免表情识别预处理
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
         
-        # 取第一个检测到的人脸
-        x, y, w, h = faces[0]
+        # 取最大的人脸（原始检测框）
+        face = max(faces, key=lambda f: f[2] * f[3])
+        x, y, w, h = face
+        
+        # ★ 从彩色原图提取人脸区域，保持原始尺寸
         face_img = image[y:y+h, x:x+w]
         
         # 识别人脸
@@ -1043,14 +1056,19 @@ def api_recognize_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # 使用统一的人脸检测函数
-        faces, gray = detect_faces_unified(image)
+        # ★ 人脸识别专用检测：直接使用 Haar Cascade，避免表情识别预处理
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
         
-        # 取第一个检测到的人脸
-        x, y, w, h = faces[0]
+        # 取最大的人脸（原始检测框）
+        face = max(faces, key=lambda f: f[2] * f[3])
+        x, y, w, h = face
+        
+        # ★ 从彩色原图提取人脸区域，保持原始尺寸
         face_img = image[y:y+h, x:x+w]
         
         # 识别人脸
