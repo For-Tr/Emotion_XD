@@ -235,39 +235,112 @@ def detect_faces_unified(image):
         faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
         return faces, gray
 
-def predict_emotion(image):
+def predict_emotion(image, use_faceid_crop=True):
     """
     预测表情
     image: BGR 彩色图像
-    返回: emotion, confidence, probabilities, face_coords
+    use_faceid_crop: 是否使用人脸识别模型裁剪人脸（推荐）
+    返回: emotion, confidence, probabilities, face_coords, recognized_user
     """
     det = load_detector()
+    recognizer = load_face_recognizer() if use_faceid_crop else None
     
-    # 检测人脸
-    if USE_PI_MODEL:
-        faces, gray = det.detect_faces(image)
-    else:
-        faces = det.detect_faces(image)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # 优先使用人脸识别模型进行人脸检测和裁剪
+    face_crop_for_emotion = None
+    face_coords = None
+    recognized_user = None
+    recognized_distance = None
     
-    if len(faces) == 0:
-        return None, None, None, None
+    print(f"[DEBUG] predict_emotion: use_faceid_crop={use_faceid_crop}, recognizer={recognizer is not None}")
     
-    # 使用最大的人脸
-    face = max(faces, key=lambda f: f[2] * f[3])
-    x, y, w, h = face
+    if use_faceid_crop and recognizer is not None:
+        try:
+            # 1. 先使用表情检测器找到人脸位置
+            if USE_PI_MODEL:
+                faces, gray = det.detect_faces(image)
+            else:
+                faces = det.detect_faces(image)
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            if len(faces) > 0:
+                # 使用最大的人脸
+                face = max(faces, key=lambda f: f[2] * f[3])
+                x, y, w, h = face
+                face_coords = face
+                
+                # 2. 使用人脸识别模型处理这个人脸区域
+                # 添加边界检查，确保坐标在图像范围内
+                img_h, img_w = image.shape[:2]
+                x = max(0, min(x, img_w - 1))
+                y = max(0, min(y, img_h - 1))
+                w = max(1, min(w, img_w - x))
+                h = max(1, min(h, img_h - y))
+                
+                # 裁剪人脸区域（与注册时保持一致，不加边距）
+                try:
+                    face_img_rgb = image[y:y+h, x:x+w]
+                except Exception as e:
+                    print(f"[!] 裁剪图像失败: {e}, coords: x={x}, y={y}, w={w}, h={h}, img_shape={image.shape}")
+                    face_img_rgb = None
+                
+                if face_img_rgb is not None and face_img_rgb.size > 0:
+                    # 3. 尝试识别用户身份
+                    try:
+                        recognized_user, recognized_distance = recognizer.recognize(face_img_rgb)
+                        print(f"[DEBUG] 人脸识别结果: {recognized_user}, 距离: {recognized_distance:.3f}")
+                    except Exception as e:
+                        print(f"[!] 人脸识别失败: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        recognized_user = "Unknown"
+                        recognized_distance = 1.0
+                    
+                    # 4. 将人脸识别裁剪的图片转为灰度图用于表情识别
+                    face_crop_for_emotion = cv2.cvtColor(face_img_rgb, cv2.COLOR_BGR2GRAY)
+        except Exception as e:
+            print(f"[!] 人脸识别裁剪失败，回退到标准检测: {e}")
+            face_crop_for_emotion = None
     
-    # 对齐和裁剪
-    face_roi = align_and_crop_face(gray, face)
+    # 如果人脸识别裁剪失败，使用原始的检测方法
+    if face_crop_for_emotion is None:
+        # 检测人脸
+        if USE_PI_MODEL:
+            faces, gray = det.detect_faces(image)
+        else:
+            faces = det.detect_faces(image)
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        if len(faces) == 0:
+            return None, None, None, None, None, None
+        
+        # 使用最大的人脸
+        face = max(faces, key=lambda f: f[2] * f[3])
+        face_coords = face
+        x, y, w, h = face
+        
+        # 添加边界检查
+        img_h, img_w = gray.shape[:2]
+        x = max(0, min(x, img_w - 1))
+        y = max(0, min(y, img_h - 1))
+        w = max(1, min(w, img_w - x))
+        h = max(1, min(h, img_h - y))
+        face = (x, y, w, h)
+        
+        # 对齐和裁剪
+        try:
+            face_crop_for_emotion = align_and_crop_face(gray, face)
+        except Exception as e:
+            print(f"[!] align_and_crop_face 失败: {e}, face={face}, gray_shape={gray.shape}")
+            face_crop_for_emotion = None
     
-    if face_roi is None:
-        return None, None, None, None
+    if face_crop_for_emotion is None:
+        return None, None, None, None, None, None
     
-    # 调整大小到 48x48
-    face48 = cv2.resize(face_roi, (48, 48))
+    # 调整大小到 48x48 用于表情识别
+    face48 = cv2.resize(face_crop_for_emotion, (48, 48))
     face48_copy = face48.copy()
     
-    # 预测
+    # 预测表情
     if USE_PI_MODEL:
         with predict_lock:
             probabilities = det.predict(face48_copy)
@@ -285,7 +358,7 @@ def predict_emotion(image):
     emotion = EMOTIONS[emotion_idx]
     confidence = float(probabilities[emotion_idx])
     
-    return emotion, confidence, probabilities if isinstance(probabilities, list) else probabilities.tolist(), face
+    return emotion, confidence, probabilities if isinstance(probabilities, list) else probabilities.tolist(), face_coords, recognized_user, recognized_distance
 
 def get_ai_analysis(emotion, confidence):
     """AI 情感分析"""
@@ -489,32 +562,29 @@ def api_predict():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # 预测表情
-        emotion, confidence, probabilities, face_coords = predict_emotion(image)
+        # 预测表情（现在会自动使用人脸识别模型裁剪）
+        emotion, confidence, probabilities, face_coords, recognized_name, distance = predict_emotion(image)
         
         if emotion is None:
             return jsonify({'error': '未检测到人脸'}), 404
         
-        # 尝试识别用户（如果启用了人脸识别）
+        # 处理识别结果
         user_id = None
         username = 'guest'
         recognized = False
         
-        recognizer = load_face_recognizer()
-        if recognizer is not None and face_coords is not None:
-            try:
-                x, y, w, h = face_coords
-                face_img = image[y:y+h, x:x+w]
-                recognized_name, distance = recognizer.recognize(face_img)
-                
-                if recognized_name != "Unknown":
-                    user = get_user_by_username(recognized_name)
-                    if user:
-                        user_id = user['id']
-                        username = user['username']
-                        recognized = True
-            except Exception as e:
-                print(f"[!] 人脸识别失败: {e}")
+        print(f"[DEBUG] API 收到识别结果: recognized_name={recognized_name}, distance={distance}")
+        
+        if recognized_name is not None and recognized_name != "Unknown":
+            user = get_user_by_username(recognized_name)
+            print(f"[DEBUG] 从数据库查询用户: {user}")
+            if user:
+                user_id = user['id']
+                username = user['username']
+                recognized = True
+                print(f"[DEBUG] 用户识别成功: user_id={user_id}, username={username}")
+        else:
+            print(f"[DEBUG] 未识别到用户，使用访客身份")
         
         # AI 分析
         ai_analysis = get_ai_analysis(emotion, confidence)
@@ -582,13 +652,41 @@ def api_upload():
         file.save(filepath)
         
         # 读取图片
-        image = cv2.imread(filepath)
+        try:
+            image = cv2.imread(filepath)
+            
+            if image is None:
+                return jsonify({'error': '无法读取图片，可能是不支持的格式或文件损坏'}), 400
+            
+            # 检查图片尺寸是否合理
+            if image.shape[0] < 10 or image.shape[1] < 10:
+                return jsonify({'error': '图片尺寸太小'}), 400
+            
+            if image.shape[0] > 10000 or image.shape[1] > 10000:
+                print(f"[!] 图片尺寸过大: {image.shape}，将进行缩放")
+                # 缩放过大的图片
+                max_dim = 2000
+                h, w = image.shape[:2]
+                if h > max_dim or w > max_dim:
+                    scale = max_dim / max(h, w)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    image = cv2.resize(image, (new_w, new_h))
+                    print(f"[✓] 图片已缩放到: {image.shape}")
+        except Exception as e:
+            print(f"[!] 读取或处理图片失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'图片处理失败: {str(e)}'}), 400
         
-        if image is None:
-            return jsonify({'error': '无法读取图片'}), 400
-        
-        # 预测表情
-        emotion, confidence, probabilities, face_coords = predict_emotion(image)
+        # 预测表情（现在会自动使用人脸识别模型裁剪）
+        try:
+            emotion, confidence, probabilities, face_coords, recognized_name, distance = predict_emotion(image)
+        except Exception as e:
+            print(f"[!] predict_emotion 发生异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'表情识别失败: {str(e)}'}), 500
         
         if emotion is None:
             return jsonify({'error': '未检测到人脸'}), 404
@@ -919,22 +1017,14 @@ def api_register_face():
                 if image is None:
                     continue
                 
-                # ★ 人脸注册专用检测：不使用表情识别的预处理
-                # 直接使用 Haar Cascade 检测，确保获取原始尺寸的人脸区域
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-                faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+                # 使用统一的人脸检测函数
+                faces, gray = detect_faces_unified(image)
                 
                 if len(faces) == 0:
                     continue
                 
-                # 取最大的人脸（原始检测框）
-                face = max(faces, key=lambda f: f[2] * f[3])
-                x, y, w, h = face
-                
-                # ★ 关键：从彩色原图提取人脸区域，不经过任何缩放
-                # 这样 face_img 保持原始检测框的尺寸（通常 200-300 像素）
-                # 人脸识别的 embed() 函数会在内部调整为 112x112
+                # 取第一个检测到的人脸
+                x, y, w, h = faces[0]
                 face_img = image[y:y+h, x:x+w]
                 
                 # 添加到人脸识别系统
@@ -983,19 +1073,14 @@ def api_login_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # ★ 人脸识别专用检测：直接使用 Haar Cascade，避免表情识别预处理
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+        # 使用统一的人脸检测函数
+        faces, gray = detect_faces_unified(image)
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
         
-        # 取最大的人脸（原始检测框）
-        face = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = face
-        
-        # ★ 从彩色原图提取人脸区域，保持原始尺寸
+        # 取第一个检测到的人脸
+        x, y, w, h = faces[0]
         face_img = image[y:y+h, x:x+w]
         
         # 识别人脸
@@ -1056,19 +1141,14 @@ def api_recognize_face():
         if image is None:
             return jsonify({'error': '无效的图片数据'}), 400
         
-        # ★ 人脸识别专用检测：直接使用 Haar Cascade，避免表情识别预处理
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+        # 使用统一的人脸检测函数
+        faces, gray = detect_faces_unified(image)
         
         if len(faces) == 0:
             return jsonify({'error': '未检测到人脸'}), 404
         
-        # 取最大的人脸（原始检测框）
-        face = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = face
-        
-        # ★ 从彩色原图提取人脸区域，保持原始尺寸
+        # 取第一个检测到的人脸
+        x, y, w, h = faces[0]
         face_img = image[y:y+h, x:x+w]
         
         # 识别人脸
@@ -1174,7 +1254,7 @@ def emotion_inference_thread():
                     continue
                 frame_copy = latest_frame.copy()
 
-            emotion, confidence, probabilities, face_coords = predict_emotion(frame_copy)
+            emotion, confidence, probabilities, face_coords, recognized_name, distance = predict_emotion(frame_copy)
             # 只有在检测到人脸时才更新表情数据
             if emotion is not None and face_coords is not None:
                 ai_analysis = get_ai_analysis(emotion, confidence)
@@ -1264,7 +1344,7 @@ def api_capture_frame():
     with frame_lock:
         frame_copy = latest_frame.copy()
 
-    emotion, confidence, probabilities, face_coords = predict_emotion(frame_copy)
+    emotion, confidence, probabilities, face_coords, recognized_name, distance = predict_emotion(frame_copy)
     if emotion is None:
         return jsonify({'error': 'No face detected'}), 404
 
@@ -1281,9 +1361,21 @@ def api_capture_frame():
     _, buffer = cv2.imencode('.jpg', frame_copy)
     image_base64 = 'data:image/jpeg;base64,' + base64.b64encode(buffer).decode('utf-8')
 
-    # 获取当前用户信息
-    user_id = session.get('user_id', None)
-    username = session.get('username', 'guest')
+    # 处理用户识别结果（优先使用人脸识别结果，而不是 session）
+    user_id = None
+    username = 'guest'
+    
+    print(f"[DEBUG] capture_frame 识别结果: recognized_name={recognized_name}, distance={distance}")
+    
+    if recognized_name is not None and recognized_name != "Unknown":
+        user = get_user_by_username(recognized_name)
+        print(f"[DEBUG] capture_frame 查询用户: {user}")
+        if user:
+            user_id = user['id']
+            username = user['username']
+            print(f"[DEBUG] capture_frame 用户确认: user_id={user_id}, username={username}")
+    else:
+        print(f"[DEBUG] capture_frame 未识别到用户，使用访客身份")
 
     # 保存记录
     record_id = save_emotion_record(
@@ -1437,7 +1529,6 @@ if __name__ == '__main__':
     print("="*60)
     print("\n[✓] 服务器启动成功！")
     print("[✓] 访问地址: http://localhost:5002")
-    print("[✓] 数据仪表板: http://localhost:5002/dashboard")
     print("[✓] 历史记录: http://localhost:5002/history")
     print("[✓] 用户中心: http://localhost:5002/user")
     
