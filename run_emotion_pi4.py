@@ -40,21 +40,52 @@ class EmotionDetectorPi:
         self.TRAIN_MEAN = np.load("train_mean.npy")
         self.TRAIN_STD = np.load("train_std.npy")
 
-        # Load TFLite model
-        self.interpreter = tflite.Interpreter(model_path="fer.tflite")
-        self.interpreter.allocate_tensors()
-        self.input_details = self.interpreter.get_input_details()
-        self.output_details = self.interpreter.get_output_details()
-
+        # Load TFLite model - 尝试多个可能的文件名
+        model_paths = ["fer_pi4.tflite", "fer.tflite"]
+        model_loaded = False
+        
+        for model_path in model_paths:
+            if os.path.exists(model_path):
+                try:
+                    print(f"[*] 加载模型文件: {model_path}")
+                    self.interpreter = tflite.Interpreter(model_path=model_path)
+                    self.interpreter.allocate_tensors()
+                    self.input_details = self.interpreter.get_input_details()
+                    self.output_details = self.interpreter.get_output_details()
+                    model_loaded = True
+                    print(f"[✓] 模型加载成功: {model_path}")
+                    break
+                except Exception as e:
+                    print(f"[!] 加载 {model_path} 失败: {e}")
+                    continue
+        
+        if not model_loaded:
+            raise FileNotFoundError(f"未找到表情识别模型文件。请确保以下文件之一存在: {', '.join(model_paths)}")
+        
         print("Pi 4 Emotion system ready")
 
     # Face detect
     def detect_faces(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.equalizeHist(gray)
-        faces = self.face_detector.detectMultiScale(
-            gray, scaleFactor=1.2, minNeighbors=5, minSize=(80, 80)
-        )
+        
+        # 添加错误处理和更宽松的检测参数
+        try:
+            # 首先尝试标准参数
+            faces = self.face_detector.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
+            )
+        except cv2.error as e:
+            print(f"[!] 人脸检测错误，尝试备用参数: {e}")
+            try:
+                # 使用更宽松的参数重试
+                faces = self.face_detector.detectMultiScale(
+                    gray, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20), maxSize=(500, 500)
+                )
+            except:
+                # 如果还是失败，返回空数组
+                faces = []
+        
         return faces, gray
 
     # Emotion predict

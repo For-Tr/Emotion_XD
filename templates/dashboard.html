@@ -356,31 +356,31 @@
     <script>
         const emotionEmojis = {
             'angry': '😠',
-            'disgusted': '🤢',
-            'fearful': '😨',
+            'disgust': '🤢',
+            'fear': '😨',
             'happy': '😊',
             'sad': '😢',
-            'surprised': '😲',
+            'surprise': '😲',
             'neutral': '😐'
         };
 
         const emotionNamesCN = {
             'angry': '愤怒',
-            'disgusted': '厌恶',
-            'fearful': '恐惧',
+            'disgust': '厌恶',
+            'fear': '恐惧',
             'happy': '快乐',
             'sad': '悲伤',
-            'surprised': '惊讶',
+            'surprise': '惊讶',
             'neutral': '中性'
         };
 
         const emotionColors = {
             'angry': '#e74c3c',
-            'disgusted': '#9b59b6',
-            'fearful': '#34495e',
+            'disgust': '#9b59b6',
+            'fear': '#34495e',
             'happy': '#f39c12',
             'sad': '#3498db',
-            'surprised': '#1abc9c',
+            'surprise': '#1abc9c',
             'neutral': '#95a5a6'
         };
 
@@ -426,7 +426,7 @@
                     emotionEmojis[maxEmotion] + ' ' + emotionNamesCN[maxEmotion];
                 
                 // 计算积极情绪占比
-                const positiveEmotions = ['happy', 'surprised'];
+                const positiveEmotions = ['happy', 'surprise'];
                 const positiveCount = positiveEmotions.reduce((sum, e) => 
                     sum + (data.emotion_counts[e] || 0), 0
                 );
@@ -542,7 +542,7 @@
                 
                 // 转换为趋势图所需格式
                 const dates = Object.keys(dailyData).sort();
-                const emotions = ['happy', 'sad', 'angry', 'surprised', 'neutral', 'fearful', 'disgusted'];
+                const emotions = ['happy', 'sad', 'angry', 'surprise', 'neutral', 'fear', 'disgust'];
                 
                 // 更新折线图 - 趋势
                 if (lineChart) lineChart.destroy();
@@ -736,7 +736,7 @@
                 const avgConf = overall.reduce((sum, item) => sum + item.avg_confidence * item.count, 0) / totalRecords;
                 document.getElementById('avgConfidence').textContent = (avgConf * 100).toFixed(1) + '%';
 
-                const positiveEmotions = ['happy', 'surprised'];
+                const positiveEmotions = ['happy', 'surprise'];
                 const positiveCount = overall
                     .filter(item => positiveEmotions.includes(item.emotion))
                     .reduce((sum, item) => sum + item.count, 0);
@@ -806,7 +806,7 @@
             // 折线图 - 趋势
             const dailyTrends = data.daily_trends || [];
             const dates = [...new Set(dailyTrends.map(item => item.date))].sort();
-            const emotions = ['happy', 'sad', 'angry', 'surprised', 'neutral', 'fearful', 'disgusted'];
+            const emotions = ['happy', 'sad', 'angry', 'surprise', 'neutral', 'fear', 'disgust'];
             
             if (lineChart) lineChart.destroy();
             const lineCtx = document.getElementById('emotionLineChart').getContext('2d');

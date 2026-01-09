@@ -244,9 +244,6 @@
                 <a href="/" class="btn btn-light btn-custom mx-2">
                     <i class="bi bi-house"></i> 返回首页
                 </a>
-                <a href="/dashboard" class="btn btn-light btn-custom mx-2">
-                    <i class="bi bi-bar-chart"></i> 数据仪表板
-                </a>
             </div>
         </div>
 
@@ -277,7 +274,7 @@
                                     <hr>
                                     
                                     <h6><i class="bi bi-camera"></i> 人脸采集</h6>
-                                    <p class="text-muted small">请拍摄 3-5 张不同角度的照片以提高识别准确率</p>
+                                    <p class="text-muted small">请拍摄 3-10 张不同角度的照片以提高识别准确率</p>
                                     
                                     <div id="videoContainer">
                                         <video id="webcam" autoplay playsinline></video>
@@ -289,7 +286,7 @@
                                             <i class="bi bi-camera"></i> 启动摄像头
                                         </button>
                                         <button type="button" id="captureFace" class="btn btn-success-custom btn-custom" style="display: none;">
-                                            <i class="bi bi-camera-fill"></i> 拍摄人脸 (<span id="captureCount">0</span>/5)
+                                            <i class="bi bi-camera-fill"></i> 拍摄人脸 (<span id="captureCount">0</span>/10)
                                         </button>
                                         <button type="button" id="stopRegisterCamera" class="btn btn-danger-custom btn-custom" style="display: none;">
                                             <i class="bi bi-stop-circle"></i> 停止摄像头
@@ -315,14 +312,14 @@
                         </div>
                     </div>
                     
-                    <!-- 登录区域 -->
+                    <!-- 用户检测区域 -->
                     <div class="col-lg-6">
                         <div class="card">
                             <div class="card-header">
-                                <i class="bi bi-box-arrow-in-right"></i> 人脸登录
+                                <i class="bi bi-person-check"></i> 用户检测
                             </div>
                             <div class="card-body">
-                                <p class="text-muted">使用已注册的人脸进行快速登录</p>
+                                <p class="text-muted">使用人脸识别检测用户身份（演示模式）</p>
                                 
                                 <div id="loginVideoContainer" style="position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 4/3;">
                                     <video id="loginWebcam" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
@@ -334,7 +331,7 @@
                                         <i class="bi bi-camera"></i> 启动摄像头
                                     </button>
                                     <button type="button" id="loginBtn" class="btn btn-success-custom btn-custom" style="display: none;">
-                                        <i class="bi bi-shield-check"></i> 进行人脸识别
+                                        <i class="bi bi-search"></i> 检测用户
                                     </button>
                                     <button type="button" id="stopLoginCamera" class="btn btn-danger-custom btn-custom" style="display: none;">
                                         <i class="bi bi-stop-circle"></i> 停止摄像头
@@ -343,7 +340,7 @@
                                 
                                 <div class="loading" id="loginLoading">
                                     <div class="spinner-border text-primary" role="status"></div>
-                                    <p class="mt-2">正在识别...</p>
+                                    <p class="mt-2">正在检测用户...</p>
                                 </div>
                                 
                                 <div id="loginResult" class="mt-3"></div>
@@ -371,10 +368,6 @@
                                 <div class="stat-badge">
                                     <i class="bi bi-calendar-check text-primary"></i>
                                     登录次数: <strong id="userLoginCount">0</strong>
-                                </div>
-                                <div class="stat-badge">
-                                    <i class="bi bi-camera text-success"></i>
-                                    人脸照片: <strong id="userFaceCount">0</strong> 张
                                 </div>
                             </div>
                             
@@ -432,7 +425,6 @@
             document.getElementById('userDisplayName').textContent = user.display_name || user.username;
             document.getElementById('userUsername').textContent = user.username;
             document.getElementById('userLoginCount').textContent = user.total_logins || 0;
-            document.getElementById('userFaceCount').textContent = user.face_encodings_count || 0;
             
             // 设置头像（显示用户名首字母）
             const firstLetter = (user.display_name || user.username).charAt(0).toUpperCase();
@@ -444,32 +436,72 @@
             try {
                 const response = await fetch('/api/camera_status');
                 const data = await response.json();
-                isPiCamera = data.pi_camera_available || false;
+                isPiCamera = data.picamera_available && data.camera_initialized;
                 console.log('[Camera Type]', isPiCamera ? 'Raspberry Pi Camera' : 'Browser Camera');
+                
+                // 如果是树莓派摄像头，自动初始化
+                if (isPiCamera) {
+                    initPiCameraForRegister();
+                    initPiCameraForLogin();
+                }
             } catch (err) {
                 console.error('检查摄像头类型失败:', err);
                 isPiCamera = false;
             }
         }
         
+        // 初始化树莓派摄像头（注册区域）
+        function initPiCameraForRegister() {
+            console.log('初始化树莓派摄像头 - 注册区域');
+            const videoElement = document.getElementById('webcam');
+            const img = document.createElement('img');
+            img.id = 'webcam';
+            img.src = '/video_feed';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'cover';
+            videoElement.parentNode.replaceChild(img, videoElement);
+            
+            // 自动显示拍摄按钮
+            document.getElementById('startRegisterCamera').style.display = 'none';
+            document.getElementById('captureFace').style.display = 'inline-block';
+            document.getElementById('stopRegisterCamera').style.display = 'none';
+        }
+        
+        // 初始化树莓派摄像头（登录区域）
+        function initPiCameraForLogin() {
+            console.log('初始化树莓派摄像头 - 登录区域');
+            const videoElement = document.getElementById('loginWebcam');
+            const img = document.createElement('img');
+            img.id = 'loginWebcam';
+            img.src = '/video_feed';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'cover';
+            videoElement.parentNode.replaceChild(img, videoElement);
+            
+            // 自动显示识别按钮
+            document.getElementById('startLoginCamera').style.display = 'none';
+            document.getElementById('loginBtn').style.display = 'inline-block';
+            document.getElementById('stopLoginCamera').style.display = 'none';
+        }
+        
         // ==================== 注册功能 ====================
         
-        // 启动注册摄像头
+        // 启动注册摄像头（仅用于浏览器摄像头）
         document.getElementById('startRegisterCamera').addEventListener('click', async () => {
+            if (isPiCamera) {
+                // 树莓派摄像头已经自动启动
+                showAlert('树莓派摄像头已自动启动', 'info');
+                return;
+            }
+            
             try {
-                if (isPiCamera) {
-                    // 树莓派摄像头：使用后端视频流
-                    const video = document.getElementById('webcam');
-                    video.removeAttribute('autoplay');
-                    video.removeAttribute('playsinline');
-                    video.outerHTML = '<img id="webcam" src="/video_feed" style="width: 100%; height: 100%; object-fit: cover;">';
-                } else {
-                    // 浏览器摄像头
-                    registerStream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { facingMode: 'user', width: 640, height: 480 } 
-                    });
-                    document.getElementById('webcam').srcObject = registerStream;
-                }
+                // 浏览器摄像头
+                registerStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: 640, height: 480 } 
+                });
+                document.getElementById('webcam').srcObject = registerStream;
                 document.getElementById('startRegisterCamera').style.display = 'none';
                 document.getElementById('captureFace').style.display = 'inline-block';
                 document.getElementById('stopRegisterCamera').style.display = 'inline-block';
@@ -478,18 +510,18 @@
             }
         });
         
-        // 停止注册摄像头
+        // 停止注册摄像头（仅用于浏览器摄像头）
         document.getElementById('stopRegisterCamera').addEventListener('click', () => {
             if (isPiCamera) {
-                // 树莓派摄像头：恢复video标签
-                const img = document.getElementById('webcam');
-                img.outerHTML = '<video id="webcam" autoplay playsinline></video>';
-            } else {
-                // 浏览器摄像头：停止媒体流
-                if (registerStream) {
-                    registerStream.getTracks().forEach(track => track.stop());
-                    document.getElementById('webcam').srcObject = null;
-                }
+                // 树莓派摄像头持续运行，不需要停止
+                showAlert('树莓派摄像头保持运行状态', 'info');
+                return;
+            }
+            
+            // 浏览器摄像头：停止媒体流
+            if (registerStream) {
+                registerStream.getTracks().forEach(track => track.stop());
+                document.getElementById('webcam').srcObject = null;
             }
             document.getElementById('startRegisterCamera').style.display = 'inline-block';
             document.getElementById('captureFace').style.display = 'none';
@@ -498,7 +530,7 @@
         
         // 拍摄人脸
         document.getElementById('captureFace').addEventListener('click', async () => {
-            if (capturedFaces.length >= 5) {
+            if (capturedFaces.length >= 10) {
                 showAlert('已达到最大拍摄数量', 'warning');
                 return;
             }
@@ -506,12 +538,12 @@
             let imageData;
             
             if (isPiCamera) {
-                // 树莓派摄像头：通过后端 API 捕获当前帧
+                // 树莓派摄像头：通过后端 API 捕获当前帧（不保存表情记录）
                 try {
-                    const response = await fetch('/api/capture_frame', {
+                    const response = await fetch('/api/capture_face', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ session_id: 'register_' + Date.now() })
+                        body: JSON.stringify({})
                     });
                     const data = await response.json();
                     
@@ -635,22 +667,20 @@
         
         // ==================== 登录功能 ====================
         
-        // 启动登录摄像头
+        // 启动登录摄像头（仅用于浏览器摄像头）
         document.getElementById('startLoginCamera').addEventListener('click', async () => {
+            if (isPiCamera) {
+                // 树莓派摄像头已经自动启动
+                showAlert('树莓派摄像头已自动启动', 'info');
+                return;
+            }
+            
             try {
-                if (isPiCamera) {
-                    // 树莓派摄像头：使用后端视频流
-                    const video = document.getElementById('loginWebcam');
-                    video.removeAttribute('autoplay');
-                    video.removeAttribute('playsinline');
-                    video.outerHTML = '<img id="loginWebcam" src="/video_feed" style="width: 100%; height: 100%; object-fit: cover;">';
-                } else {
-                    // 浏览器摄像头
-                    loginStream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { facingMode: 'user', width: 640, height: 480 } 
-                    });
-                    document.getElementById('loginWebcam').srcObject = loginStream;
-                }
+                // 浏览器摄像头
+                loginStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: 640, height: 480 } 
+                });
+                document.getElementById('loginWebcam').srcObject = loginStream;
                 document.getElementById('startLoginCamera').style.display = 'none';
                 document.getElementById('loginBtn').style.display = 'inline-block';
                 document.getElementById('stopLoginCamera').style.display = 'inline-block';
@@ -659,35 +689,35 @@
             }
         });
         
-        // 停止登录摄像头
+        // 停止登录摄像头（仅用于浏览器摄像头）
         document.getElementById('stopLoginCamera').addEventListener('click', () => {
             if (isPiCamera) {
-                // 树莓派摄像头：恢复video标签
-                const img = document.getElementById('loginWebcam');
-                img.outerHTML = '<video id="loginWebcam" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>';
-            } else {
-                // 浏览器摄像头：停止媒体流
-                if (loginStream) {
-                    loginStream.getTracks().forEach(track => track.stop());
-                    document.getElementById('loginWebcam').srcObject = null;
-                }
+                // 树莓派摄像头持续运行，不需要停止
+                showAlert('树莓派摄像头保持运行状态', 'info');
+                return;
+            }
+            
+            // 浏览器摄像头：停止媒体流
+            if (loginStream) {
+                loginStream.getTracks().forEach(track => track.stop());
+                document.getElementById('loginWebcam').srcObject = null;
             }
             document.getElementById('startLoginCamera').style.display = 'inline-block';
             document.getElementById('loginBtn').style.display = 'none';
             document.getElementById('stopLoginCamera').style.display = 'none';
         });
         
-        // 进行人脸识别登录
+        // 进行用户检测（演示模式，不登录）
         document.getElementById('loginBtn').addEventListener('click', async () => {
             let imageData;
             
             if (isPiCamera) {
-                // 树莓派摄像头：通过后端 API 捕获当前帧
+                // 树莓派摄像头：通过后端 API 捕获当前帧（不保存表情记录）
                 try {
-                    const response = await fetch('/api/capture_frame', {
+                    const response = await fetch('/api/capture_face', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ session_id: 'login_' + Date.now() })
+                        body: JSON.stringify({})
                     });
                     const data = await response.json();
                     
@@ -717,7 +747,8 @@
             document.getElementById('loginLoading').style.display = 'block';
             
             try {
-                const response = await fetch('/api/login_face', {
+                // 使用 recognize_face API（仅识别，不登录）
+                const response = await fetch('/api/recognize_face', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -729,21 +760,30 @@
                 
                 const data = await response.json();
                 
-                if (data.success) {
-                    showAlert(data.message, 'success');
-                    
-                    // 停止摄像头
-                    document.getElementById('stopLoginCamera').click();
-                    
-                    // 切换到用户视图
-                    setTimeout(() => {
-                        showUserView(data.user);
-                    }, 1000);
+                if (data.success && data.recognized) {
+                    // 显示识别结果，不进行登录跳转
+                    const resultHtml = `
+                        <div class="alert alert-success alert-custom">
+                            <h5><i class="bi bi-check-circle-fill"></i> 识别成功</h5>
+                            <p class="mb-1"><strong>用户名:</strong> ${data.username}</p>
+                            <p class="mb-0"><strong>显示名称:</strong> ${data.display_name}</p>
+                        </div>
+                    `;
+                    document.getElementById('loginResult').innerHTML = resultHtml;
+                    showAlert(`识别成功：${data.display_name}`, 'success');
                 } else {
-                    showAlert(data.message || '登录失败，未识别到注册用户', 'warning');
+                    // 未识别到用户
+                    const resultHtml = `
+                        <div class="alert alert-warning alert-custom">
+                            <h5><i class="bi bi-exclamation-triangle-fill"></i> 未识别</h5>
+                            <p class="mb-0">未检测到已注册用户</p>
+                        </div>
+                    `;
+                    document.getElementById('loginResult').innerHTML = resultHtml;
+                    showAlert('未检测到已注册用户', 'warning');
                 }
             } catch (err) {
-                showAlert('登录请求失败: ' + err.message, 'danger');
+                showAlert('检测请求失败: ' + err.message, 'danger');
             } finally {
                 document.getElementById('loginLoading').style.display = 'none';
             }

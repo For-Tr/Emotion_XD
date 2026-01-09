@@ -5,6 +5,7 @@ import os
 import cv2
 import numpy as np
 import tensorflow as tf
+import threading
 
 class FaceID:
     """使用 TensorFlow Lite 的人脸识别系统"""
@@ -26,6 +27,7 @@ class FaceID:
         self.inp = input_details[0]["index"]
         self.out = output_details[0]["index"]
         
+        self.lock = threading.Lock()  # 添加线程锁
         self.load_db()
 
     def embed(self, face):
@@ -66,27 +68,33 @@ class FaceID:
 
     def recognize(self, face, threshold=0.55):
         """识别人脸"""
-        if self.emb_array is None:
-            return "Unknown", 1.0
-        try:
-            e = self.embed(face)
-            d = np.linalg.norm(self.emb_array - e, axis=1)
-            i = np.argmin(d)
-            if d[i] < threshold:
-                return self.names[i], d[i]
-            return "Unknown", d[i]
-        except:
-            return "Unknown", 1.0
+        with self.lock:  # 使用线程锁
+            if self.emb_array is None or len(self.names) == 0:
+                return "Unknown", 1.0
+            try:
+                e = self.embed(face)
+                d = np.linalg.norm(self.emb_array - e, axis=1)
+                i = np.argmin(d)
+                # 添加边界检查
+                if i >= len(self.names) or i >= len(d):
+                    return "Unknown", 1.0
+                if d[i] < threshold:
+                    return self.names[i], d[i]
+                return "Unknown", d[i]
+            except Exception as e:
+                print(f"[ERROR] Recognition failed: {e}")
+                return "Unknown", 1.0
 
     def add(self, name, face):
         """添加新的人脸照片"""
-        folder = os.path.join(self.db, name)
-        os.makedirs(folder, exist_ok=True)
-        idx = len(os.listdir(folder)) + 1
-        img_path = os.path.join(folder, f"{idx}.jpg")
-        cv2.imwrite(img_path, face)
-        self.load_db()
-        print(f"[INFO] Added face for {name} at {img_path}")
+        with self.lock:  # 使用线程锁
+            folder = os.path.join(self.db, name)
+            os.makedirs(folder, exist_ok=True)
+            idx = len(os.listdir(folder)) + 1
+            img_path = os.path.join(folder, f"{idx}.jpg")
+            cv2.imwrite(img_path, face)
+            self.load_db()
+            print(f"[INFO] Added face for {name} at {img_path}")
         
     def get_user_count(self):
         """获取用户数量"""

@@ -18,7 +18,6 @@ import cv2
 import numpy as np
 import threading
 from flask import Flask, render_template, request, jsonify, Response, session, send_from_directory
-from keras.models import model_from_json
 
 # 尝试导入树莓派摄像头支持
 PICAMERA_AVAILABLE = False
@@ -40,11 +39,26 @@ except ImportError:
     print("[!] 使用标准 Keras 模型")
 
 # 导入人脸识别系统
+FACE_ID_AVAILABLE = False
+FaceID = None
+
 try:
-    from face_id_adapter import FaceID
+    # 优先尝试树莓派版本（使用 tflite_runtime）
+    from face_id import FaceID
     FACE_ID_AVAILABLE = True
+    print("[✓] 加载树莓派版人脸识别系统 (tflite_runtime)")
+except ImportError:
+    try:
+        # 回退到完整 TensorFlow 版本
+        from face_id_adapter import FaceID
+        FACE_ID_AVAILABLE = True
+        print("[✓] 加载标准版人脸识别系统 (tensorflow)")
+    except ImportError as e:
+        print(f"[!] 人脸识别系统不可用: {e}")
+        print("[!] 提示：需要安装 tflite_runtime (树莓派) 或 tensorflow (其他平台)")
+        FACE_ID_AVAILABLE = False
 except Exception as e:
-    print(f"[!] 人脸识别系统不可用: {e}")
+    print(f"[!] 人脸识别系统加载失败: {e}")
     FACE_ID_AVAILABLE = False
 
 # 初始化 Flask 应用
@@ -180,11 +194,25 @@ def load_face_recognizer():
     if face_recognizer is None and FACE_ID_AVAILABLE:
         try:
             print("[*] 正在加载人脸识别系统...")
-            face_recognizer = FaceID(model="mobilefacenet.tflite", db=FACE_DB_PATH)
+            
+            # 检查模型文件是否存在
+            model_path = "mobilefacenet.tflite"
+            if not os.path.exists(model_path):
+                print(f"[!] 人脸识别模型文件不存在: {model_path}")
+                print("[!] 人脸识别功能将不可用。表情识别功能仍可正常使用。")
+                print("[!] 如需使用人脸识别功能，请下载 mobilefacenet.tflite 模型文件")
+                return None
+            
+            face_recognizer = FaceID(model=model_path, db=FACE_DB_PATH)
             print("[✓] 人脸识别系统加载成功！")
+        except FileNotFoundError as e:
+            print(f"[!] 模型文件未找到: {e}")
+            face_recognizer = None
         except Exception as e:
             print(f"[!] 人脸识别系统加载失败: {e}")
-            print("[!] 提示：如果缺少 mobilefacenet.tflite 模型文件，人脸识别功能将不可用")
+            print(f"[!] 错误详情: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             face_recognizer = None
     return face_recognizer
 
@@ -442,6 +470,7 @@ def index():
 
 @app.route('/api/predict', methods=['POST'])
 def api_predict():
+    """预测表情（不保存记录，仅用于实时显示）"""
     try:
         data = request.get_json()
         
@@ -487,11 +516,16 @@ def api_predict():
         # AI 分析
         ai_analysis = get_ai_analysis(emotion, confidence)
         
-        # 保存记录（关联用户信息）
-        session_id = data.get('session_id', f'web_{int(time.time())}')
-        record_id = save_emotion_record(emotion, confidence, probabilities, 
-                                       ai_analysis=ai_analysis, session_id=session_id,
-                                       user_id=user_id, username=username)
+        # 检查是否需要保存记录（通过参数控制）
+        should_save = data.get('save_record', False)
+        record_id = None
+        
+        if should_save:
+            # 保存记录（关联用户信息）
+            session_id = data.get('session_id', f'web_{int(time.time())}')
+            record_id = save_emotion_record(emotion, confidence, probabilities, 
+                                           ai_analysis=ai_analysis, session_id=session_id,
+                                           user_id=user_id, username=username)
         
         # 准备响应
         response = {
@@ -842,7 +876,10 @@ def api_register_face():
     try:
         recognizer = load_face_recognizer()
         if recognizer is None:
-            return jsonify({'error': '人脸识别系统未加载'}), 503
+            return jsonify({
+                'error': '人脸识别系统未加载。请确保 mobilefacenet.tflite 模型文件存在。',
+                'suggestion': '人脸识别功能需要 mobilefacenet.tflite 模型文件。您可以：\n1. 下载模型文件并放置在项目根目录\n2. 或者暂时使用表情识别功能（无需人脸注册）'
+            }), 503
         
         data = request.get_json()
         
@@ -1071,11 +1108,14 @@ def init_picamera():
         try:
             print("[*] 正在初始化树莓派摄像头...")
             picam2 = Picamera2()
+            # 直接启动，使用默认配置（picamera2 会自动处理颜色格式）
             picam2.start()
             print("[✓] 树莓派摄像头初始化成功！")
             return True
         except Exception as e:
             print(f"[!] 树莓派摄像头初始化失败: {e}")
+            import traceback
+            traceback.print_exc()
             picam2 = None
             return False
     return picam2 is not None
@@ -1189,7 +1229,7 @@ def emotion_probs():
 
 @app.route('/api/capture_frame', methods=['POST'])
 def api_capture_frame():
-    """捕获当前帧并分析"""
+    """捕获当前帧并分析（保存表情记录）"""
     global latest_frame
     
     if latest_frame is None:
@@ -1247,6 +1287,27 @@ def api_capture_frame():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/capture_face', methods=['POST'])
+def api_capture_face():
+    """捕获当前帧用于人脸识别（不保存表情记录）"""
+    global latest_frame
+    
+    if latest_frame is None:
+        return jsonify({'error': 'No frame available yet'}), 503
+
+    with frame_lock:
+        frame_copy = latest_frame.copy()
+
+    # 只返回图片，不做表情分析
+    _, buffer = cv2.imencode('.jpg', frame_copy)
+    image_base64 = 'data:image/jpeg;base64,' + base64.b64encode(buffer).decode('utf-8')
+
+    return jsonify({
+        'success': True,
+        'image_base64': image_base64,
+        'timestamp': datetime.now().isoformat()
+    })
+
 @app.route('/uploads/<path:filename>')
 def serve_uploads(filename):
     """提供上传文件访问"""
@@ -1294,6 +1355,31 @@ def api_camera_status():
         'use_pi_model': USE_PI_MODEL
     })
 
+@app.route('/api/faceid_status')
+def api_faceid_status():
+    """检查人脸识别系统状态"""
+    model_exists = os.path.exists("mobilefacenet.tflite")
+    recognizer = load_face_recognizer()
+    
+    status = {
+        'available': FACE_ID_AVAILABLE,
+        'model_exists': model_exists,
+        'initialized': recognizer is not None,
+        'registered_users': recognizer.get_user_count() if recognizer else 0,
+        'message': ''
+    }
+    
+    if not FACE_ID_AVAILABLE:
+        status['message'] = '缺少 tflite_runtime 或 tensorflow 库'
+    elif not model_exists:
+        status['message'] = '缺少 mobilefacenet.tflite 模型文件'
+    elif recognizer is None:
+        status['message'] = '人脸识别系统初始化失败'
+    else:
+        status['message'] = '人脸识别系统正常运行'
+    
+    return jsonify(status)
+
 if __name__ == '__main__':
     # 初始化数据库
     init_db()
@@ -1301,7 +1387,14 @@ if __name__ == '__main__':
     # 预加载模型
     print("[*] 预加载模型...")
     load_detector()
-    load_face_recognizer()
+    
+    print("[*] 预加载人脸识别系统...")
+    face_rec = load_face_recognizer()
+    if face_rec:
+        print(f"[✓] 人脸识别系统已就绪，当前注册用户数: {face_rec.get_user_count()}")
+    else:
+        print("[!] 人脸识别系统不可用（缺少模型文件或依赖库）")
+        print("[!] 表情识别功能仍可正常使用，但无法注册和识别用户")
     
     # 启动树莓派摄像头线程（如果可用）
     if PICAMERA_AVAILABLE:

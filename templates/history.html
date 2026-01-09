@@ -214,9 +214,6 @@
                 <a href="/" class="btn btn-back">
                     <i class="bi bi-arrow-left"></i> 返回主页
                 </a>
-                <a href="/dashboard" class="btn btn-back">
-                    <i class="bi bi-bar-chart"></i> 数据仪表板
-                </a>
                 <button class="btn export-btn" onclick="exportData()">
                     <i class="bi bi-download"></i> 导出数据
                 </button>
@@ -240,12 +237,12 @@
                         <select class="form-select" id="emotionFilter" onchange="displayRecords()">
                             <option value="all">全部表情</option>
                             <option value="happy">😊 快乐</option>
-                            <option value="sad">😢 悲伤</option>
-                            <option value="angry">😠 愤怒</option>
-                            <option value="surprised">😲 惊讶</option>
-                            <option value="neutral">😐 中性</option>
-                            <option value="fearful">😨 恐惧</option>
-                            <option value="disgusted">🤢 厌恶</option>
+                                <option value="sad">😢 悲伤</option>
+                                <option value="angry">😠 愤怒</option>
+                                <option value="surprise">😲 惊讶</option>
+                                <option value="neutral">😐 中性</option>
+                                <option value="fear">😨 恐惧</option>
+                                <option value="disgust">🤢 厌恶</option>
                         </select>
                     </div>
                 </div>
@@ -288,31 +285,31 @@
     <script>
         const emotionEmojis = {
             'angry': '😠',
-            'disgusted': '🤢',
-            'fearful': '😨',
+            'disgust': '🤢',
+            'fear': '😨',
             'happy': '😊',
             'sad': '😢',
-            'surprised': '😲',
+            'surprise': '😲',
             'neutral': '😐'
         };
 
         const emotionNamesCN = {
             'angry': '愤怒',
-            'disgusted': '厌恶',
-            'fearful': '恐惧',
+            'disgust': '厌恶',
+            'fear': '恐惧',
             'happy': '快乐',
             'sad': '悲伤',
-            'surprised': '惊讶',
+            'surprise': '惊讶',
             'neutral': '中性'
         };
 
         const emotionColors = {
             'angry': '#e74c3c',
-            'disgusted': '#9b59b6',
-            'fearful': '#34495e',
+            'disgust': '#9b59b6',
+            'fear': '#34495e',
             'happy': '#f39c12',
             'sad': '#3498db',
-            'surprised': '#1abc9c',
+            'surprise': '#1abc9c',
             'neutral': '#95a5a6'
         };
 
@@ -463,9 +460,9 @@
                     <h6><i class="bi bi-graph-up"></i> 表情概率分布</h6>
             `;
 
-            if (record.probabilities && record.probabilities.length > 0) {
-                const emotions = ['angry', 'disgusted', 'fearful', 'happy', 'sad', 'surprised', 'neutral'];
-                emotions.forEach((emotion, index) => {
+                if (record.probabilities && record.probabilities.length > 0) {
+                    const emotions = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral'];
+                    emotions.forEach((emotion, index) => {
                     const prob = record.probabilities[index] || 0;
                     content += `
                         <div class="prob-item">
