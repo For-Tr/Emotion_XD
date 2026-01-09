@@ -177,19 +177,11 @@
             </div>
         </div>
 
-        <!-- 用户过滤器 -->
+        <!-- 时间过滤器 -->
         <div class="card mb-3">
             <div class="card-body">
                 <div class="row align-items-center">
-                    <div class="col-md-4">
-                        <label class="form-label"><i class="bi bi-person"></i> 数据范围:</label>
-                        <select class="form-select" id="userFilter" onchange="loadStats()">
-                            <option value="">所有用户</option>
-                            <option value="current">仅我的数据</option>
-                            <option value="guest">访客数据</option>
-                        </select>
-                    </div>
-                    <div class="col-md-8">
+                    <div class="col-md-12">
                         <label class="form-label"><i class="bi bi-clock"></i> 时间范围:</label>
                         <div class="btn-group w-100" role="group">
                             <button type="button" class="btn btn-outline-primary time-btn-new" data-days="1">今天</button>
@@ -404,8 +396,7 @@
 
         // 加载统计数据
         async function loadStats() {
-            const userFilter = document.getElementById('userFilter').value;
-            const url = userFilter ? `/api/stats?user=${userFilter}` : '/api/stats';
+            const url = '/api/stats';
             
             try {
                 document.getElementById('loadingOverlay').style.display = 'flex';
@@ -437,8 +428,8 @@
                 // 更新图表
                 updateCharts(data);
                 
-                // 更新用户统计表格（如果没有过滤用户）
-                if (!userFilter && data.user_stats && data.user_stats.length > 0) {
+                // 更新用户统计表格
+                if (data.user_stats && data.user_stats.length > 0) {
                     document.getElementById('userStatsSection').style.display = 'block';
                     updateUserStatsTable(data.user_stats, data.total_records);
                 } else {
@@ -446,7 +437,7 @@
                 }
                 
                 // 同时加载记录数据用于趋势等
-                loadRecordsForTrends(userFilter);
+                loadRecordsForTrends();
                 
             } catch (err) {
                 console.error('加载统计数据失败:', err);
@@ -517,8 +508,8 @@
         }
 
         // 加载记录用于趋势分析
-        async function loadRecordsForTrends(userFilter) {
-            const url = userFilter ? `/api/records?limit=1000&user=${userFilter}` : '/api/records?limit=1000';
+        async function loadRecordsForTrends() {
+            const url = '/api/records?limit=1000';
             
             try {
                 const response = await fetch(url);

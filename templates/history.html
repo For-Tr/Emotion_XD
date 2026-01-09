@@ -220,18 +220,10 @@
             </div>
         </div>
 
-        <!-- 用户过滤器 -->
+        <!-- 表情过滤器 -->
         <div class="card mb-3">
             <div class="card-body">
                 <div class="row align-items-center">
-                    <div class="col-md-6">
-                        <label class="form-label"><i class="bi bi-person"></i> 按用户过滤:</label>
-                        <select class="form-select" id="userFilter" onchange="changeUserFilter()">
-                            <option value="">所有用户</option>
-                            <option value="current">仅我的记录</option>
-                            <option value="guest">访客记录</option>
-                        </select>
-                    </div>
                     <div class="col-md-6">
                         <label class="form-label"><i class="bi bi-emoji-smile"></i> 按表情过滤:</label>
                         <select class="form-select" id="emotionFilter" onchange="displayRecords()">
@@ -321,16 +313,10 @@
             loadRecords();
         });
 
-        // 改变用户过滤器
-        async function changeUserFilter() {
-            await loadRecords();
-        }
-
         // 加载记录
         async function loadRecords() {
             try {
-                const userFilter = document.getElementById('userFilter').value;
-                const url = userFilter ? `/api/records?limit=100&user=${userFilter}` : '/api/records?limit=100';
+                const url = '/api/records?limit=100';
                 
                 const response = await fetch(url);
                 const data = await response.json();
@@ -517,9 +503,7 @@
 
         // 导出数据
         function exportData() {
-            const userFilter = document.getElementById('userFilter').value;
-            const url = userFilter ? `/api/export?user=${userFilter}` : '/api/export';
-            window.location.href = url;
+            window.location.href = '/api/export';
         }
     </script>
 </body>
